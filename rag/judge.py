@@ -38,14 +38,12 @@ def check_relevance(question: str, docs: list[Document]) -> bool:
 
 
 def rewrite_query(question: str, tech: str, paper: str, docs: list[Document]) -> str:
-    prompt = render_prompt("rag_rewrite", 
-        question=question, tech=tech, paper=paper, context=format_context(docs) or "(없음)"
+    prompt = render_prompt(
+        "rag_rewrite", question=question, tech=tech, paper=paper, context=format_context(docs) or "(없음)"
     )
     return llm("judge").invoke(prompt).content.strip().strip('"')
 
 
 def check_faithfulness(question: str, answer: str, docs: list[Document]) -> Faithfulness:
-    prompt = render_prompt("rag_faithfulness", 
-        question=question, answer=answer, context=format_context(docs)
-    )
+    prompt = render_prompt("rag_faithfulness", question=question, answer=answer, context=format_context(docs))
     return llm("judge").with_structured_output(Faithfulness).invoke(prompt)
