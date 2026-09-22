@@ -18,12 +18,15 @@ from agents._common import TECHS, llm, load_prompt
 from graph.state import GraphState
 
 REQUIRED_INPUTS = ("tech_summary", "market_eval", "stakeholder_eval", "domain_eval")
-SOURCE_TAG = re.compile(r"\[(?:논문(?: p\.\d+)?|웹(?: [^\]]+)?|추론)\]")
+# 태그 형식은 느슨하게 — LLM 이 [논문 p.2, p.6] · [논문 2402.02750 p.2] · [논문 없음] · [p.2] 처럼 변형해 쓴다.
+# 엄격 매칭으로 ValidationError 를 내면 워커 전체가 실패 기록으로 대체돼 보고서에서 관점이 통째로 빠진다 (2026-09-22 통합 실행에서 발생).
+SOURCE_TAG = re.compile(r"\[(?:논문|웹|추론|p\.\d+)[^\]]*\]")
 
 
 def _require_source_tag(value: str) -> str:
-    if value.strip() != "근거 없음" and not SOURCE_TAG.search(value):
-        raise ValueError("판단 문장에 출처 태그가 필요합니다")
+    """출처 태그가 없으면 [추론] 을 붙인다 — 근거 없는 판단은 추론으로 집계(장치 6). 거부하지 않는다."""
+    if value.strip() and value.strip() != "근거 없음" and not SOURCE_TAG.search(value):
+        return value.rstrip() + " [추론]"
     return value
 
 
