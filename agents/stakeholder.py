@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from agents import _web_eval as web
+from graph.dispatcher import LLM_BUDGET
 from graph.state import GraphState
 
 FAILURE = "반대 근거 확보 실패 [추론]"
@@ -165,7 +166,7 @@ def run(state: GraphState) -> dict:
             result = _merge(previous, web.blank("기술 조사 입력 없음"))
         out[tech] = result
     # 한 기술 처리 중 예산 초과가 발생해도 양쪽 모두 종료 상태를 정확하게 기록한다.
-    exhausted = retry >= 2 or state.get("llm_calls", 0) + calls > 100
+    exhausted = retry >= 2 or state.get("llm_calls", 0) + calls > LLM_BUDGET   # 상한은 dispatcher 한 곳에서 (#29: 100 → 150)
     for result in out.values():
         _finish(result, exhausted)
     return {"stakeholder_eval": out,

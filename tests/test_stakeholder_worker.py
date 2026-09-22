@@ -7,7 +7,7 @@ import pytest
 
 from agents import _web_eval as web
 from agents import stakeholder
-from graph.dispatcher import dispatcher
+from graph.dispatcher import LLM_BUDGET, dispatcher
 from graph.state import Eval
 from tests.web_fakes import claim, install, source, state
 
@@ -170,7 +170,7 @@ def test_all_searches_empty_leave_failure_marker_without_inventing_sources(monke
 def test_budget_exhaustion_marks_failure_for_both_technologies(monkeypatch):
     install(monkeypatch, lambda p: response(p, 0))
     current = ready_state()
-    current["llm_calls"] = 100
+    current["llm_calls"] = LLM_BUDGET
     result = stakeholder.run(current)
     assert result["llm_calls"] == 2
     assert all(e["negatives"] == [stakeholder.FAILURE] for e in result["stakeholder_eval"].values())
