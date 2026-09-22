@@ -1,0 +1,42 @@
+# 설계서 0.3 — 스마트폰 온디바이스 LLM 환경 정의 (State.domain 으로 로드)
+name: 스마트폰 온디바이스 LLM
+example_products: [Galaxy AI, Apple Intelligence]
+
+constraints:
+  memory:
+    ram_gb: [8, 16]
+    unified: true
+    hbm: false
+    expandable: false
+    shared_with_os_and_apps: true
+  power:
+    battery_powered: true
+    sustained_watts: "수 W"
+    memory_transfer_costs_power: true
+  deployment:
+    model_delivery: 벤더 OTA
+    on_device_finetune: false
+    retraining: false
+  quality:
+    note: 어시스턴트 응답 품질 = 제품 품질 → 압축 손실에 민감
+
+# 대표 시나리오 (설계서 0.2)
+scenario:
+  model: 7B, 가중치 4bit (약 3.5GB)
+  ram_gb: 12
+  context_tokens: 8192
+  kv_cache_fp16_gb: 4   # 0.5MB/token × 8K
+
+# 평가 3축 (설계서 0.3) — 판정 임계값 없음, 해석에만 사용
+axes:
+  - key: recall
+    question: 필요한 정보가 얼마나 보존되는가
+  - key: latency
+    question: 추론 과정에서 발생하는 지연은 어느 정도인가
+  - key: memory
+    question: KV cache 가 차지하는 메모리를 얼마나 줄이는가
+
+# HW 우호 반례 — 도메인 워커가 웹검색으로 직접 수집 (설계서 5.5 장치 7)
+counter_examples:
+  - "LLM in a flash (Apple, arXiv 2312.11514)"
+  - "Samsung LPDDR5X-PIM"

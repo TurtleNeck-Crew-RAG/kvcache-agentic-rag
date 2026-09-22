@@ -1,0 +1,55 @@
+name: "🐛 Bug"
+description: "동작하지 않는 것"
+title: "[BUG] "
+labels: ["bug"]
+
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 어느 파트
+      description: 소유자가 고칩니다. 남의 디렉토리를 직접 고치지 마세요.
+      options:
+        - "A RAG·기술조사 (rag/ · agents/tech_research)"
+        - "B 시장·이해관계자 (agents/market · agents/stakeholder)"
+        - "C 도메인·종합 (agents/domain · agents/synthesis)"
+        - "D State·Graph·보고서 (graph/ · agents/report · app.py)"
+        - "공용 (config · scripts · CI)"
+        - "모르겠음"
+    validations:
+      required: true
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 증상
+      description: 무엇이 어떻게 안 되나요? State 의 어느 키가 기대와 다른가요?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 재현 방법
+      value: |
+        1. `bash scripts/fetch_papers.sh && python -m rag.indexing`
+        2. `python app.py` (또는 `pytest tests/...`)
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: 에러 / LangSmith 트레이스
+      description: 트레이스백 전문(길면 마지막 20줄) 또는 LangSmith 실행 링크 (프로젝트 kv-cache-eval)
+      render: shell
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: 확인한 것
+      options:
+        - label: "최신 `main` 에서도 재현됩니다"
+        - label: "`.env` 키(OPENAI · TAVILY)가 들어 있고 `uv sync` 를 했습니다"
+        - label: "`data/papers/*.pdf` 2개와 `data/index/` 가 있습니다 (RAG 관련일 때)"

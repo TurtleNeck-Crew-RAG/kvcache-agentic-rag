@@ -1,0 +1,61 @@
+chunks=299  eval=20  k=4
+
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 48518.47it/s]
+BAAI/bge-m3                              ko Hit@4=0.65 MRR=0.50 | en Hit@4=0.65 MRR=0.50 | index 18s
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 8538.23it/s]
+[1mXLMRobertaModel LOAD REPORT[0m from: intfloat/multilingual-e5-large
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+intfloat/multilingual-e5-large           ko Hit@4=0.55 MRR=0.48 | en Hit@4=0.50 MRR=0.50 | index 17s
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 16631.79it/s]
+[1mBertModel LOAD REPORT[0m from: BAAI/bge-base-en-v1.5
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+A new version of the following files was downloaded from https://huggingface.co/nomic-ai/nomic-bert-2048:
+- configuration_hf_nomic_bert.py
+. Make sure to double-check they do not contain any added malicious code. To avoid downloading new versions of the code file, you can pin a revision.
+Encountered exception while importing einops: No module named 'einops'
+BAAI/bge-base-en-v1.5                    ko Hit@4=0.35 MRR=0.24 | en Hit@4=0.45 MRR=0.42 | index 5s
+Traceback (most recent call last):
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/experiments/embed_compare/embed_compare.py", line 110, in <module>
+    main()
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/experiments/embed_compare/embed_compare.py", line 97, in main
+    r = evaluate(m, chunks, eval_set, a.k)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/experiments/embed_compare/embed_compare.py", line 52, in evaluate
+    model = SentenceTransformer(model_name, trust_remote_code=True)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/sentence_transformers/SentenceTransformer.py", line 327, in __init__
+    modules, self.module_kwargs = self._load_sbert_model(
+                                  ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/sentence_transformers/SentenceTransformer.py", line 2323, in _load_sbert_model
+    module = module_class.load(
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/sentence_transformers/models/Transformer.py", line 436, in load
+    return cls(model_name_or_path=model_name_or_path, **init_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/sentence_transformers/models/Transformer.py", line 121, in __init__
+    self._load_model(model_name_or_path, config, cache_dir, backend, is_peft_model, **model_args)
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/sentence_transformers/models/Transformer.py", line 270, in _load_model
+    self.auto_model = AutoModel.from_pretrained(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/transformers/models/auto/auto_factory.py", line 369, in from_pretrained
+    model_class = get_class_from_dynamic_module(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/transformers/dynamic_module_utils.py", line 572, in get_class_from_dynamic_module
+    final_module = get_cached_module_file(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/transformers/dynamic_module_utils.py", line 410, in get_cached_module_file
+    modules_needed = check_imports(resolved_module_file)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yujin/projects/skala-workspace/rag/langgraph-v1/.venv/lib/python3.11/site-packages/transformers/dynamic_module_utils.py", line 258, in check_imports
+    raise ImportError(
+ImportError: This modeling file requires the following packages that were not found in your environment: einops. Run `pip install einops`

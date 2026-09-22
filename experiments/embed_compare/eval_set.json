@@ -1,0 +1,22 @@
+[
+  {"question_ko": "KIVI에서 Key cache는 어떤 단위로 양자화해야 하는가?", "question_en": "Along which dimension should the key cache be quantized in KIVI?", "gold": "key cache should be quantized per-channel"},
+  {"question_ko": "KIVI 적용 시 피크 메모리는 얼마나 줄어드는가?", "question_en": "How much does KIVI reduce peak memory?", "gold": "2.6× less peak memory"},
+  {"question_ko": "KIVI가 실제 추론 워크로드에서 달성한 처리량 향상은?", "question_en": "What throughput improvement does KIVI achieve on real inference workloads?", "gold": "3.47× throughput"},
+  {"question_ko": "KIVI는 파인튜닝 없이 적용 가능한 알고리즘인가?", "question_en": "Is KIVI a tuning-free quantization algorithm?", "gold": "tuning-free 2bit kv cache quantization algorithm"},
+  {"question_ko": "KIVI 실험에서 residual length R은 몇으로 설정했는가?", "question_en": "What residual length R is used in the KIVI experiments?", "gold": "residual length r for key and value cache is set to 128"},
+  {"question_ko": "Llama와 Mistral에서 KIVI 2bit 적용 시 정확도 하락은 최대 얼마인가?", "question_en": "What is the maximum accuracy drop of KIVI on Llama and Mistral models?", "gold": "kivi only has up to 2%"},
+  {"question_ko": "Falcon-7B처럼 multi-query attention을 쓰는 모델에서는 KIVI가 몇 bit가 필요한가?", "question_en": "Which bit width does KIVI need for Falcon-7B with multi-query attention?", "gold": "4bit kivi is needed to maintain the accuracy"},
+  {"question_ko": "KIVI가 최근 토큰을 full precision으로 유지하는 방식은?", "question_en": "How does KIVI keep recent tokens in full precision?", "gold": "full precision kv cache sliding window"},
+  {"question_ko": "Key cache에 채널별 양자화가 필요한 이유는 무엇인가?", "question_en": "Why does the key cache require per-channel quantization?", "gold": "a few fixed channels whose magnitudes are very large"},
+  {"question_ko": "KIVI 정상 컨텍스트 길이 평가에 사용한 벤치마크 프레임워크는?", "question_en": "Which benchmark framework is used for normal context length evaluation of KIVI?", "gold": "lm-eval (gao et al., 2021)"},
+  {"question_ko": "InfiniGen은 중요한 토큰을 어떻게 예측하는가?", "question_en": "How does InfiniGen speculate which tokens are important?", "gold": "minimal rehearsal"},
+  {"question_ko": "InfiniGen은 기존 KV cache 관리 방식 대비 성능을 얼마나 향상시키는가?", "question_en": "How much does InfiniGen improve performance over prior KV cache management methods?", "gold": "up to 3.00×"},
+  {"question_ko": "오프로딩 기반 추론 시스템에서 새로운 병목은 무엇인가?", "question_en": "What is the new bottleneck in offloading-based inference systems?", "gold": "low pcie bandwidth between the cpu and gpu"},
+  {"question_ko": "InfiniGen은 query/key 행렬을 skew하기 위해 어떤 분해 기법을 쓰는가?", "question_en": "Which decomposition does InfiniGen use to skew the query and key matrices?", "gold": "singular value decomposition (svd)"},
+  {"question_ko": "InfiniGen은 KV cache pool을 GPU와 CPU 중 어디에 유지하는가?", "question_en": "Where does InfiniGen maintain the KV cache pool, GPU or CPU?", "gold": "maintains the kv cache pool on the cpu"},
+  {"question_ko": "InfiniGen 실험에 사용된 GPU는 무엇인가?", "question_en": "Which GPU was used in the InfiniGen experiments?", "gold": "nvidia rtx a6000"},
+  {"question_ko": "InfiniGen의 비교 대상 오프로딩 환경 두 가지는?", "question_en": "What are the two offloading baselines InfiniGen is compared against?", "gold": "cuda unified virtual memory (uvm)"},
+  {"question_ko": "InfiniGen의 KV cache pool 제거 정책은 무엇인가?", "question_en": "What eviction policy does the InfiniGen pool manager use?", "gold": "counter-based policy"},
+  {"question_ko": "토큰을 완전히 제거하는 eviction 방식의 문제점은?", "question_en": "What is the problem with outright token eviction approaches?", "gold": "non-negligible drop in accuracy"},
+  {"question_ko": "InfiniGen은 prefill 단계에서 무엇을 생성하는가?", "question_en": "What does InfiniGen generate during the prefill stage?", "gold": "generates partial weights"}
+]

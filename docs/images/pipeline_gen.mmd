@@ -1,0 +1,6 @@
+flowchart LR
+    C([관련성 통과 컨텍스트]) --> PR[Prompt<br/>컨텍스트에 p.N 태그<br/>없으면 없다고 답하라]
+    PR --> G[Generator<br/>gpt-4.1-mini<br/>structured output]
+    G --> J2{Faithfulness Judge<br/>gpt-4.1-mini · t=0}
+    J2 -->|pass| OUT[TechSummary / facts<br/>+ citations + retrieval_log]
+    J2 -->|fail| NG[근거 없음 기록]

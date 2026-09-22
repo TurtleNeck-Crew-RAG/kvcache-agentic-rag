@@ -1,0 +1,10 @@
+flowchart LR
+    Q[고정 질문<br/>기술 조사 5 · 도메인 5<br/>한국어] --> R1[Dense 검색<br/>BGE-M3]
+    Q --> R2[Sparse 검색<br/>M3-sparse / BM25]
+    R1 --> R3[Ensemble<br/>0.5 / 0.5 · k=4]
+    R2 --> R3
+    R3 --> J1{관련성 Judge<br/>gpt-4.1-mini · t=0}
+    J1 -. "no · retry<1 → 재작성<br/>(노드 내부 루프, ≤1)" .-> RW[질문 재작성<br/>gpt-4.1-mini]
+    RW --> R1
+    J1 -->|no · retry≥1| NG[근거 없음 기록]
+    J1 -->|yes| PR([생성 단계로])

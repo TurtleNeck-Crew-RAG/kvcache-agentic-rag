@@ -1,0 +1,47 @@
+name: "🔧 Chore"
+description: "설정 · CI · 의존성 · 문서 · 설계 변경 · 실험"
+title: "[CHORE] "
+labels: ["chore"]
+
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 종류
+      options:
+        - "설정 · CI · 의존성 (pyproject / .env.example / workflows)"
+        - "문서 (README / CONTRIBUTING / ROLES)"
+        - "설계 변경 (설계서와 코드가 어긋남)"
+        - "실험 · 실측 (experiments/ — 임베딩 · sparse 비교 · chunk 재측정)"
+        - "보고서 · 발표 준비"
+    validations:
+      required: true
+
+  - type: textarea
+    id: about
+    attributes:
+      label: 무엇을
+      description: |
+        설계 변경이라면 아래를 함께 적어주세요.
+        - 어느 절 / 현재 설계 / 왜 바꿔야 하나 / 제안
+        실험이라면: 무엇을 재는지 / 비교 대상 / 판정 기준 (예: 같은 20문항 Hit@4)
+    validations:
+      required: true
+
+  - type: textarea
+    id: todo
+    attributes:
+      label: To Do
+      value: |
+        - [ ] Task 1
+        - [ ] Task 2
+
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: 영향 범위
+      options:
+        - label: "코드 수정 필요"
+        - label: "`docs/설계서.md` 수정 필요 (제출본과 달라지면 보고서 한계점에 사유 기록)"
+        - label: "README Tech Stack 수치(Hit Rate / MRR / RAGAS) 갱신 필요"
+        - label: "조원 합의 필요 (설계는 조 전체가 정한 것이므로 혼자 바꾸지 않습니다)"

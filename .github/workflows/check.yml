@@ -1,0 +1,37 @@
+name: 검사
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: API 키 하드코딩 검사
+        run: |
+          if grep -rnE "sk-[A-Za-z0-9_-]{20,}|tvly-[A-Za-z0-9_-]{10,}|lsv2_[A-Za-z0-9_-]{10,}" \
+               --include='*.py' --include='*.md' --include='*.yaml' --include='*.yml' --include='*.json' \
+               --exclude-dir=.git --exclude-dir=.venv . ; then
+            echo "::error::API 키가 코드에 들어 있습니다. .env 로 옮기세요."; exit 1
+          fi
+
+      - name: 커밋 금지 파일 검사
+        run: |
+          bad=$(git ls-files | grep -E '^(\.env$|data/papers/.*\.pdf$|data/index/|data/cache/|reference/)' || true)
+          if [ -n "$bad" ]; then echo "::error::커밋하면 안 되는 파일: $bad"; exit 1; fi
+
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 문법 · import 순서 (ruff)
+        run: uvx ruff check .
+
+      - name: 단위 테스트 (LLM · 모델 다운로드 없이 도는 것만)
+        # 전체 의존성(torch 등)은 무거워서 CI 에선 langgraph + pytest 만 설치
+        run: uvx --with langgraph --with pytest pytest -q tests

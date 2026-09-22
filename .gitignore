@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# uv 가상환경
+.venv/
+
+# 환경변수 / API 키
+.env
+.env.*
+!.env.example
+
+# 강의자료 / 과제 원문 / 제출본 (저작권·비공개)
+reference/
+
+# 논문 PDF — scripts/fetch_papers.sh 로 arXiv에서 내려받음
+data/papers/*.pdf
+
+# 인덱스·임베딩 캐시 (재실행으로 재현)
+data/index/
+data/cache/
+
+# 실행 산출물 — 최종 보고서(outputs/report/*.md, *.pdf)만 커밋
+outputs/**
+!outputs/.gitkeep
+!outputs/report/
+!outputs/report/*.md
+!outputs/report/*.pdf
+
+# 압축파일
+*.zip

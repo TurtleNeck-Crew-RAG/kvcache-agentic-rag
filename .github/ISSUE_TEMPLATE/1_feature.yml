@@ -1,0 +1,79 @@
+name: "✨ Feature"
+description: "에이전트 · RAG · 그래프 · 보고서 기능 구현"
+title: "[FEAT] "
+labels: ["feature"]
+
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 담당 파트
+      options:
+        - "A RAG·기술조사 (rag/ · agents/tech_research · experiments/) — 박유진"
+        - "B 시장·이해관계자 (agents/market · agents/stakeholder · prompts/rubrics 4.2·4.3) — 심준용"
+        - "C 도메인·종합·편향장치 (agents/domain · agents/synthesis · prompts/neutrality_judge) — 민영은"
+        - "D State·Graph·보고서 (graph/ · agents/report · app.py · 발표) — 황재원"
+        - "공용 (config/ · scripts/ · pyproject · CI · README)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: about
+    attributes:
+      label: About
+      description: 구현하려는 기능 — 목적, 입력 State 키 → 출력 State 키
+      placeholder: "예: 이해관계자 워커. 입력 tech_summary → 출력 stakeholder_eval[tech] (negatives ≥2)"
+    validations:
+      required: true
+
+  - type: input
+    id: design
+    attributes:
+      label: 설계서 근거
+      description: docs/설계서.md 의 절 번호 (표 행까지 적으면 좋음)
+      placeholder: "예: 2장 표 '이해관계자 평가' 행 + 4.3 Rubric + 5.3 규칙 2'"
+    validations:
+      required: true
+
+  - type: textarea
+    id: todo
+    attributes:
+      label: To Do
+      value: |
+        - [ ] Task 1
+        - [ ] Task 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: dod
+    attributes:
+      label: 완료 조건 (DoD)
+      value: |
+        - [ ] `run(state) -> dict` 인터페이스, 자기 출력 키만 반환 (설계서 5.2)
+        - [ ] KIVI · InfiniGen 독립 호출 — 같은 프롬프트에 두 기술을 넣지 않음
+        - [ ] 출력에 `[논문 p.N]` / `[웹 URL]` / `[추론]` 태그, `citations` 누적
+        - [ ] `python app.py` 가 끝까지 돈다 (또는 단위 테스트 `pytest` 통과)
+        - [ ] 남의 디렉토리를 건드리지 않음
+
+  - type: input
+    id: blocking
+    attributes:
+      label: 의존 관계 (선택)
+      description: "이 작업이 기다리는 것 / 막고 있는 것. 순서는 docs/ROLES.md 의 의존 그래프 참고"
+      placeholder: "예: #2 (D의 State 스키마)가 머지돼야 시작 가능"
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 브랜치 생성 방법
+        이슈 번호 확인 후 아래 규칙으로 브랜치를 만드세요.
+
+        ### Branch Naming Rule
+        - `feat/<issueNumber>-<slug>`
+
+        Example: `feat/3-stakeholder-worker`
+
+        > 오른쪽 사이드바 **Development → Create a branch** 를 쓰면
+        > GitHub 가 `3-feat-...` 형태로 자동 제안합니다.
+        > 그 팝업에서 `feat/3-stakeholder-worker` 로 **직접 고쳐서** 만들어주세요.

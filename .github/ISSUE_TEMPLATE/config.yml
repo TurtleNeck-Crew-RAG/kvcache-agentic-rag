@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 브랜치 · 커밋 · PR 규칙
+    url: https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/blob/main/CONTRIBUTING.md
+    about: 브랜치 네이밍, 커밋 컨벤션, PR/머지 규칙을 먼저 확인해주세요.
+  - name: 파트 분담 · 의존 순서
+    url: https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/blob/main/docs/ROLES.md
+    about: 누가 어느 디렉토리를 맡는지, 무엇이 무엇을 기다리는지.
+  - name: 설계서
+    url: https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/blob/main/docs/설계서.md
+    about: Agent 정의, RAG 파이프라인, Rubric, State, Graph, 보고서 목차. 이슈에는 절 번호로 근거를 답니다.

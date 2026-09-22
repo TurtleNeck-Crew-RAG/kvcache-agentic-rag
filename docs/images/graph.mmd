@@ -1,0 +1,15 @@
+flowchart TB
+    S([START: domain, selected]) --> IDX[인덱싱<br/>KIVI · InfiniGen]
+    IDX --> T[1 기술 조사 × 2<br/>RAG · 재작성 ≤1 은 노드 내부]
+    T --> M[2 시장<br/>Tavily]
+    T --> K[2 이해관계자<br/>Tavily]
+    T --> D[2 도메인<br/>RAG + Tavily]
+    M --> J1{반대 근거 ≥ 2 ?}
+    K --> J1
+    D --> J1
+    J1 -. "부족 · retry<2 → 재검색" .-> K
+    J1 -- "충족 / retry≥2 → 실패 기록" --> SY[3 종합<br/>매트릭스 · conflicts]
+    SY --> J2{중립성 Judge}
+    J2 -. "fail · retry<2 → 재작성" .-> SY
+    J2 -- "pass / retry≥2 → 위반 표시" --> R[4 보고서<br/>md → PDF]
+    R --> E([END])

@@ -1,0 +1,6 @@
+flowchart LR
+    P1[KIVI.pdf 15p<br/>InfiniGen.pdf 18p] --> P2[Loader<br/>PyMuPDFLoader<br/>page 메타데이터]
+    P2 --> P3[Splitter<br/>Recursive 600 / overlap 100<br/>chunk_id · tech · page]
+    P3 --> P4[Embedding<br/>BGE-M3 로컬<br/>CacheBackedEmbeddings]
+    P4 --> P5[(VectorStore<br/>Chroma · tech 필터)]
+    P4 --> P6[(Sparse 인덱스<br/>M3-sparse 동시 산출<br/>BM25 선택 시 Splitter에서)]
