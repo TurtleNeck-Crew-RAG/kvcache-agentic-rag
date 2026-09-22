@@ -142,3 +142,40 @@ def test_search_deduplicates_and_combines_snippets(monkeypatch):
     sources, notes = web.search(["one", "two"])
     assert len(sources) == 1 and not notes
     assert sources[source("KIVI")["url"]]["content"] == "first quote\nsecond quote"
+
+
+def test_excerpt_ids_resolve_to_verbatim_source_and_unknown_ids_are_rejected():
+    sources = {source("KIVI")["url"]: source("KIVI")}
+    grounding = web.Grounding(sources)
+    selected = web.Claim.model_validate(claim("KIVI", "배포 복잡성", "E4"))
+    assert grounding.quote(selected) == "Complex deployment."
+    assert grounding.claim(selected, require_web=True)
+    assert grounding.claim(selected.model_copy(update={"quote": "E999"}), require_web=True) is None
+    assert grounding.claim(selected.model_copy(update={"source_url": "https://unknown.org"})) is None
+
+
+def test_indexed_and_literal_quotes_share_deduplication_key():
+    grounding = web.Grounding({source("KIVI")["url"]: source("KIVI")})
+    claims = [web.Claim.model_validate(claim("KIVI", "비용", "E3")),
+              web.Claim.model_validate(claim("KIVI", "같은 비용", "High memory cost."))]
+    assert len(grounding.claims(claims, require_web=True)) == 1
+
+
+def test_excerpts_remain_contiguous_even_for_long_unbroken_content():
+    content = "Long paragraph " * 100 + "\n" + "a" * 900
+    chunks = web.excerpts(content)
+    assert chunks and all(0 < len(text) <= 420 and text in content for text in chunks.values())
+
+
+def test_live_style_excerpt_ids_produce_market_evidence(monkeypatch):
+    def indexed(payload):
+        result = response(payload)
+        assert "excerpts" in payload["sources"][0]
+        assert "content" not in payload["sources"][0]
+        for axis in ("adoption", "market_connection", "ecosystem"):
+            result[axis]["reason"]["quote"] = "E1"
+        return result
+
+    install(monkeypatch, indexed)
+    result = market.run(state())
+    assert all("채택: 중" in e["grade"] for e in result["market_eval"].values())

@@ -61,7 +61,7 @@ def _evaluate(response: StakeholderResponse, sources: dict) -> tuple[dict, list]
     # 추론/실패 메시지를 찬반 근거 최소 건수로 인정하지 않는다.
     positives = grounding.claims(response.positives, require_web=True)
     # 발췌문도 남겨 다음 실행에서 같은 근거의 문구만 바꾼 중복을 식별한다.
-    negative_claims = [claim.model_copy(update={"text": f"{claim.text} (원문: {claim.quote})"})
+    negative_claims = [claim.model_copy(update={"text": f"{claim.text} (원문: {grounding.quote(claim)})"})
                        for claim in response.negatives]
     negatives = grounding.claims(negative_claims, require_web=True)
     result = {

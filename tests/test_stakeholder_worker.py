@@ -233,3 +233,20 @@ def test_failure_marker_is_idempotent_and_never_counts_as_real_evidence():
     stakeholder._finish(result, exhausted=True)
     stakeholder._finish(result, exhausted=True)
     assert result["negatives"] == [stakeholder.FAILURE]
+
+
+def test_excerpt_ids_preserve_real_quotes_and_deduplicate_across_retry(monkeypatch):
+    def indexed(payload):
+        data = response(payload, 1)
+        data["negatives"][0]["quote"] = "E3" if not payload["retry"] else "High memory cost."
+        data["negatives"][0]["text"] = f"비용 표현 {payload['retry']}"
+        return data
+
+    install(monkeypatch, indexed)
+    current = ready_state()
+    apply(current, stakeholder.run(current))
+    current.update(dispatcher(current))
+    result = stakeholder.run(current)
+    for evaluation in result["stakeholder_eval"].values():
+        assert len(evaluation["negatives"]) == 1
+        assert "(원문: High memory cost.)" in evaluation["negatives"][0]

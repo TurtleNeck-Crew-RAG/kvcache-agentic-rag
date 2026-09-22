@@ -23,7 +23,7 @@ class Claim(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1, description="한국어 판단 한 문장. 출처 태그는 코드가 추가한다.")
     source_url: str | None = Field(description="제공된 검색 결과 URL. 추론이면 null.")
-    quote: str = Field(description="검색 content에 실제 있는 연속 발췌문. 추론이면 빈 문자열.")
+    quote: str = Field(description="선택한 URL의 excerpts에 있는 원문 번호(예: E3). 원문을 복사하거나 요약하지 말 것. 추론이면 빈 문자열.")
 
 
 class MarketAxis(BaseModel):
@@ -91,7 +91,11 @@ def search(queries: list[str]) -> tuple[dict[str, dict], list[str]]:
 def messages(worker: str, rubric: str, tech: str, summary: dict, sources: dict, **extra) -> list:
     payload = {
         "tech": tech, "reference_date": date.today().isoformat(),
-        "tech_summary": summary, "sources": list(sources.values()), **extra,
+        "tech_summary": summary,
+        "sources": [{"url": source["url"], "title": source["title"],
+                     "published_date": source["published_date"],
+                     "excerpts": excerpts(source["content"])} for source in sources.values()],
+        **extra,
     }
     return [
         ("system", load_prompt(worker) + "\n\n" + load_prompt(rubric)),
@@ -116,6 +120,22 @@ def _normalized(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
+def excerpts(content: str) -> dict[str, str]:
+    """모델이 재작성하지 않고 선택할 수 있도록 연속 원문에 번호를 붙인다."""
+    parts = []
+    for paragraph in re.split(r"(?<=[.!?。])\s+|\n+", content):
+        paragraph = paragraph.strip()
+        while paragraph:
+            end = len(paragraph)
+            if end > 420:
+                end = paragraph.rfind(" ", 0, 420)
+                if end < 1:
+                    end = 420
+            parts.append(paragraph[:end])
+            paragraph = paragraph[end:].strip()
+    return {f"E{index}": text for index, text in enumerate(parts, start=1)}
+
+
 class Grounding:
     """생성 모델이 만든 URL/발췌문을 검증하고 사용한 citation만 만든다."""
 
@@ -125,6 +145,13 @@ class Grounding:
         self.used = set()
         self.rejected = 0
 
+    def quote(self, claim: Claim) -> str:
+        source = self.sources.get(claim.source_url)
+        if not source:
+            return claim.quote
+        # 직접 인용을 반환하는 기존 응답도 원문 일치 검증을 거쳐 수용한다.
+        return excerpts(source["content"]).get(claim.quote, claim.quote)
+
     def claim(self, claim: Claim, *, require_web: bool = False) -> str | None:
         if claim.source_url is None:
             if require_web:
@@ -133,7 +160,7 @@ class Grounding:
             text, tag, ref = f"{claim.text} [추론]", "추론", ""
         else:
             source = self.sources.get(claim.source_url)
-            quote = _normalized(claim.quote)
+            quote = _normalized(self.quote(claim))
             if not source or not quote or quote not in _normalized(source["content"]):
                 self.rejected += 1
                 return None
@@ -148,7 +175,7 @@ class Grounding:
         output, seen = [], set()
         for claim in claims:
             # 같은 발췌문을 바꿔 말한 두 문장으로 최소 건수를 채우지 않는다.
-            key = (claim.source_url, _normalized(claim.quote or claim.text))
+            key = (claim.source_url, _normalized(self.quote(claim) or claim.text))
             if key in seen:
                 continue
             text = self.claim(claim, require_web=require_web)

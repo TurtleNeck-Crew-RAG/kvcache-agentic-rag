@@ -21,7 +21,9 @@
 ## 출처와 출력
 
 - reason, positives, negatives는 Claim(text, source_url, quote)로 작성한다.
-- 웹 근거는 sources에 있는 URL과 content에서 그대로 복사한 연속 발췌문을 함께 제공한다.
+- 웹 근거는 sources에 있는 URL과 해당 URL의 excerpts 번호(예: E3)를 선택한다.
+  quote에는 번호만 쓴다. 원문을 재작성·이어 붙이기·번역·말줄임표로 줄이기 하지 않는다.
+  한 text에는 선택한 원문 하나가 뒷받침하는 사실 하나만 쓴다.
   text는 태그 없는 한국어 문장이다. 코드가 `[웹 URL]`을 추가한다.
 - 추론은 source_url=null, quote="". 추론은 reason에만 쓰고 positives/negatives를 채우지 않는다.
 - 모든 실제 반응은 주체를 명시한다. 투자·미디어 보도를 제품 채택 증거로 오인하지 않는다.

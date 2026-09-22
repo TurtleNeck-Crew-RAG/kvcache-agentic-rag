@@ -10,7 +10,9 @@
 - 각 축의 grade는 상/중/하/근거 없음. 세 축을 하나의 종합 점수로 환산하지 않는다.
 - positives와 negatives에 해당 기술의 기회·제약을 쓰되 개수 때문에 지어내지 않는다.
 - 모든 reason 및 긍정·부정 문장은 Claim(text, source_url, quote)로 작성한다.
-  웹 사실이면 sources에 있는 URL과 content에서 그대로 복사한 연속 발췌문을 사용한다.
+  웹 사실이면 sources에 있는 URL과 해당 URL의 excerpts 번호(예: E3)를 선택한다.
+  quote에는 번호만 쓴다. 원문을 재작성·이어 붙이기·번역·말줄임표로 줄이기 하지 않는다.
+  text는 선택한 원문 하나가 뒷받침하는 사실 한 문장으로 제한한다.
   추론은 source_url=null, quote=""로 명시한다. 태그는 코드가 추가하므로 text에 URL·태그를 넣지 않는다.
 - 자료 부재는 grade="근거 없음"으로 기록하고 추론임을 표시한다.
 - confidence는 0~1. 직접 근거가 부족하거나 오래된 자료면 낮춘다.
