@@ -1,0 +1,22 @@
+[
+ "KIVI key cache quantization unit",
+ "KIVI peak memory reduction amount",
+ "Throughput improvement achieved by KIVI in real inference workloads",
+ "Is KIVI an algorithm applicable without fine-tuning?",
+ "residual length R setting in KIVI experiments",
+ "accuracy drop of KIVI 2bit in Llama and Mistral models",
+ "KIVI bit requirement for models using multi-query attention like Falcon-7B",
+ "KIVI method for maintaining recent tokens in full precision",
+ "Why is per-channel quantization necessary for key cache?",
+ "Benchmark framework used for KIVI normal context length evaluation",
+ "How does InfiniGen predict important tokens?",
+ "InfiniGen performance improvement compared to existing KV cache management methods",
+ "new bottleneck in offloading-based inference systems",
+ "InfiniGen decomposition technique used for skewing query/key matrices",
+ "InfiniGen KV cache pool location GPU or CPU",
+ "GPU used in InfiniGen experiments",
+ "Two offloading environments compared with InfiniGen",
+ "InfiniGen KV cache pool removal policy",
+ "problems of eviction method that completely removes tokens",
+ "What does InfiniGen generate during the prefill stage"
+]

@@ -33,12 +33,12 @@ def _dump(state: dict, visited: list[str], error: str | None, elapsed: float) ->
     """부분 State 라도 outputs/ 에 남긴다 — 어디서 깨졌는지 보기 위해."""
     OUT.mkdir(parents=True, exist_ok=True)
     for key in DUMP_KEYS:
-        if state.get(key) is not None:
+        if state.get(key):                        # 빈 dict/list 는 파일을 만들지 않는다 (init_state 의 {} 와 구분)
             (OUT / f"{key}.json").write_text(json.dumps(state[key], ensure_ascii=False, indent=2), encoding="utf-8")
     (OUT / "run.json").write_text(json.dumps({
         "ok": error is None,
         "error": error,
-        "visited": visited,                       # 노드 실행 순서 — 규칙표대로 갔는지 확인
+        "visited": visited,                       # Dispatcher 결정 순서 — 규칙표대로 갔는지 확인 (병렬은 " | " 로 묶임)
         "llm_calls": state.get("llm_calls"),
         "retry": state.get("retry"),
         "elapsed_sec": round(elapsed, 1),
@@ -74,7 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         # stream_mode="values" — 슈퍼스텝마다 전체 State 가 온다. 중간에 죽어도 마지막 것을 갖는다
         for step in app.stream(state, config={"recursion_limit": 40}, stream_mode="values"):
             state = step
-            visited.append(state.get("next", ["?"])[0] if state.get("next") else "start")
+            nxt = " | ".join(state.get("next") or [])   # Dispatcher 가 정한 다음 노드(들). 병렬이면 "market | stakeholder | domain"
+            if nxt and (not visited or visited[-1] != nxt):
+                visited.append(nxt)
     except Exception as e:                        # noqa: BLE001 — 어디서 깨졌는지 남기는 게 목적
         error = f"{type(e).__name__}: {e}"
         print(f"graph: 실패 — {error}", file=sys.stderr)

@@ -1,23 +1,206 @@
 {
-  "_note": "손으로 쓴 예시 — B·C 워커가 A 의 tech_research 를 기다리지 않고 개발하기 위한 입력. 수치는 설계서·논문 기준이나 페이지는 확인 필요",
+  "_note": "agents.tech_research 실제 출력 (2026-09-22, gpt-4.1-mini, 이중 질의 하이브리드 dense-ko + BM25-en k=4, llm_calls=46, retrieval yes 10/10). B·C 워커 입력용",
   "KIVI": {
-    "overview": "학습·보정 없이 KV cache 를 2bit 로 양자화하는 사후 기법 [논문 p.1]",
-    "mechanism": "Key 는 per-channel, Value 는 per-token 으로 비대칭 양자화. 최근 토큰은 full precision 으로 남겨 두는 residual 윈도우 [논문 p.4]",
-    "numbers": ["피크 메모리 2.6× 감소 [논문 p.1]", "배치 4× 확대, 처리량 최대 3.47× [논문 p.1]"],
-    "limitations": ["MQA 모델(Falcon-7B)은 2bit 에서 정확도 하락이 커 4bit 필요 [논문 p.7]", "양자화·역양자화 연산이 추가됨 [추론]"],
-    "apply_conditions": ["배포된 모델에 재학습 없이 적용 가능 [논문 p.1]", "residual 윈도우 크기·그룹 크기 하이퍼파라미터 [논문 p.5]"],
+    "numbers": [
+      "KIVI는 Llama-2-7B 모델에서 KV 캐시를 2bit로 압축하여 2.6×의 피크 메모리 사용량 감소를 달성했으며, 이로 인해 최대 4× 더 큰 배치 크기를 지원하고 2.35×에서 3.47× 사이의 처리량 향상을 보였다[p.2][p.1][p.8]"
+    ],
+    "limitations": [
+      "KIVI 논문에서 밝힌 한계는 2bit KIVI가 4bit KIVI에 비해 정확도 하락이 클 수 있다는 점이다. 특히, multi-query attention을 채택하고 KV cache에 하나의 헤드만 있는 경우, 2bit KIVI는 큰 정확도 하락을 보일 수 있다[p.6]"
+    ],
+    "apply_conditions": [
+      "KIVI를 기존 모델에 적용하기 위해서는 재학습, 보정 데이터, 전용 하드웨어, 사전 계산, 하이퍼파라미터 조정에 대한 별도의 언급은 없으며, GPU에서 하드웨어 친화적인 구현을 제공하고 CUDA 및 Triton을 사용하여 연산을 최적화하였다[p.6]",
+      "KIVI는 Llama2-7B, Llama2-13B, Llama2-7B-Chat, Llama2-13B-Chat, Falcon-7B, Mistral-7B 모델에 적용되었으며, Llama, Falcon, Mistral 모델 패밀리를 대상으로 평가되었다[p.6][p.6]",
+      "실험 환경으로는 단일 NVIDIA A100 GPU (80GB)를 사용하였다[p.8]"
+    ],
+    "overview": "KIVI는 긴 컨텍스트나 배치 추론 시 KV 캐시의 저장과 로딩이 메모리와 속도의 병목 현상을 일으키는 문제를 해결하려는 기술이며, 핵심 접근 방향은 KV 캐시를 2비트로 효율적으로 양자화하여 메모리 사용량을 줄이고 배치 크기와 처리량을 증가시키는 것이다[p.2][p.3][p.9].",
+    "mechanism": "KIVI는 KV cache를 그룹화하여 처리한다. 구체적으로, 키 캐시와 값 캐시를 그룹화하여 양자화하고, 잔여 키 캐시와 값 캐시는 원래 정밀도로 유지한다. 그룹화된 키 캐시(XKg)와 값 캐시(XVg)는 토큰 차원으로 그룹 양자화(GroupQuant)를 수행하며, 잔여 키 캐시(XKr)와 값 캐시(XVr)는 전체 정밀도로 유지한다. 잔여 캐시에는 최대 R(실제로는 R ≤128)개의 토큰이 포함되며, 전체 시퀀스 길이(lprompt + lgen)가 R보다 훨씬 길기 때문에 잔여 캐시의 메모리 오버헤드는 극히 적다. 이러한 설계는 극저비트 양자화의 이점을 장기 컨텍스트 시나리오에서 활용할 수 있게 한다. 또한, KIVI는 프리필(prefill)과 디코딩(decoding) 단계에서 각각 그룹 양자화와 키 양자화(KeyQuant)를 적용하며, \"Q_Matmul\"이라는 혼합 정밀도 행렬 곱셈을 통해 디퀀타이즈와 행렬 곱셈을 타일 수준에서 융합한다. 이 알고리즘의 자세한 의사 코드는 Algorithm 1에 제공된다.[p.3][p.5][p.12]",
     "evidence": [
-      {"claim": "2.6× peak memory reduction", "tag": "논문", "ref": "2402.02750", "page": 1}
+      {
+        "claim": "In scenarios with long contexts or batched inferences, the memory and speed bottlenecks are storing and loading KV cache. The most simple and effective way to alleviate this problem is to reduce the total bytes occupied by KV cache, specifically, quantization.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 3
+      },
+      {
+        "claim": "• A new plug-and-play 2bit KV cache quantization algorithm without any fine-tuning, KIVI, with hardware-friendly implementation. We conduct an extensive evaluation for KIVI with Llama, Mistral, and Falcon on popular generation tasks. KIVI can efficiently compress KV cache to 2bit and bring 2.6× peak memory usage reduction for Llama-2-7B, with little to no accuracy drop. With our efficient system implementation, this memory reduction, in return, enables up to 4× larger batch size and brings 2.35× ∼3.47× throughput.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 2
+      },
+      {
+        "claim": "workload, KIVI allows up to 4× larger batch sizes and 3.47× throughput.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 9
+      },
+      {
+        "claim": "In KIVI, the grouped key cache XKg and value cache XVg is quantized, while the residual key cache XKr and value cache XVr is kept in full precision. By design, there are at most R tokens inside XKr or XVr. In practice, we set R ≤128 and the sequence length lprompt + lgen is often much longer than R. Thus the memory overhead from XKr and XVr is negligible when considering the benefit from extreme low-bit quantization, especially for the long context scenarios.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 5
+      },
+      {
+        "claim": "Figure 3: The overview of KIVI algorithm. For ease of illustration, we omit the value cache and attention output parts. The detailed pseudo-code is provided in Algorithm 1. Here “Q_Matmul” is the mix-precision matrix multiplication which fuses the dequantization with matrix multiplication at the tiling level.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 5
+      },
+      {
+        "claim": "Algorithm 1: The KIVI Prefill & Decoding Algorithm parameter: group size G, residual length R procedure Prefill: Input: X ∈Rlprompt×d XK = XWK, XV = XWV XVg = XV [: lprompt −R], XVr = XV [lprompt −R :] Q(XVg) ←GroupQuant(XVg, dim=token, numGroup=d//G) Q(XKg), XKr ←KeyQuant(XK)",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 12
+      },
+      {
+        "claim": "and value cache should be quantized along different dimensions. We analyze the rationale behind this observation in Section 3.2. Then based on the analysis, we propose KIVI, a new KV cache quantization method along with its streaming data structure, detailed in Section 3.3.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 3
+      },
+      {
+        "claim": "KIVI can efficiently compress KV cache to 2bit and bring 2.6× peak memory usage reduction for Llama-2-7B, with little to no accuracy drop. With our efficient system implementation, this memory reduction, in return, enables up to 4× larger batch size and brings 2.35× ∼3.47× throughput.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 2
+      },
+      {
+        "claim": "and Mistral models to maintain almost the same quality while using 2.6× less peak memory (including model weight). This reduction in memory usage enables up to 4× larger batch size, bringing 2.35× ∼3.47× throughput on real LLM inference workload.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 1
+      },
+      {
+        "claim": "As shown in Figure 5, with similar maximum memory usage, KIVI enables up to 4× larger batch size and gives 2.35× ∼3.47× larger throughput.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 8
+      },
+      {
+        "claim": "Thus, in Table 3, 4bit KIVI is needed to maintain the accuracy, while 2bit KIVI may have a large accuracy drop in this case.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 6
+      },
+      {
+        "claim": "We provide a hardware-friendly implementation for running KIVI on GPUs. To minimize the overhead, we have fused the dequantization process with matrix multiplication, e.g., Q_MatMul in Figure 3, using CUDA. We also implement the group-wise quantization kernel in Triton. Our method is fully compatible with weight-only quantization.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 6
+      },
+      {
+        "claim": "We evaluate KIVI using three popular model families: Llama/Llama-2 (Touvron et al., 2023a;b), Falcon (Penedo et al., 2023) and Mistral (Jiang et al., 2023). Llama and Mistral model is based on multi-head attention,",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 6
+      },
+      {
+        "claim": "We apply KIVI to Llama2-7B, Llama2-13B, Llama2-7B-Chat, Llama2-13B-Chat, Falcon-7B and Mistral-7B.",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 6
+      },
+      {
+        "claim": "The hardware here is a single NVIDIA A100 GPU (80GB).",
+        "tag": "논문",
+        "ref": "2402.02750",
+        "page": 8
+      }
     ]
   },
   "InfiniGen": {
-    "overview": "KV cache 를 CPU 메모리로 오프로딩하고, 다음 레이어에서 중요할 KV 만 예측해 프리패치하는 동적 관리 기법 [논문 p.1]",
-    "mechanism": "이전 레이어의 attention 입력과 부분 가중치로 다음 레이어의 중요 토큰을 예측(rehearsal) → 그 KV 만 GPU 로 전송 [논문 p.5]",
-    "numbers": ["기존 오프로딩(FlexGen 등) 대비 최대 3.00× 성능 향상 [논문 p.9]", "실험 환경 RTX A6000 + PCIe 3.0 [논문 p.9]"],
-    "limitations": ["실험이 서버 GPU·PCIe 기준 — 모바일 플래시 대역폭에서 프리패치 지연 미검증 [논문 p.9] [추론]", "예측 실패 시 정확도·지연 trade-off [논문 p.10]"],
-    "apply_conditions": ["전용 HW 없이 메모리 계층(GPU↔CPU)만 있으면 됨 [논문 p.1]", "레이어별 부분 가중치(SVD) 사전 계산 필요 [논문 p.6]"],
+    "numbers": [
+      "InfiniGen은 FlexGen 대비 데이터 전송량 감소로 추론 속도를 크게 향상시켰으며, InfiniGen은 Ideal 대비 1.52× 느리지만 다른 방법들은 3.90×-18.55× 느리다[p.13]",
+      "평가에는 Open Pre-trained Transformer (OPT) 모델 6.7B, 13B, 30B 파라미터와 Llama-2 7B, 13B 모델이 사용되었다[p.9]",
+      "InfiniGen은 추론 지연 시간을 크게 단축하면서 언어 모델 성능을 유지하며, 배치 크기, 시퀀스 길이, 모델 크기에 대해 이전 솔루션보다 더 나은 확장성을 보인다[p.14]"
+    ],
+    "limitations": [
+      "InfiniGen의 성능은 KV cache의 상대 크기가 10% 이상일 때 전체 캐시 기준선과 거의 일치하며, 일부 경우에는 전체 캐시 기준선보다 약간 더 나은 정확도를 보인다. 그러나 KV cache 크기가 충분하지 않으면 정확도가 눈에 띄게 떨어진다. 또한, 30B 모델에서는 모델 파라미터가 GPU 메모리에 맞지 않아 30%를 CPU로 오프로딩해야 하며, 이 경우 오프로딩된 파라미터 크기가 KV cache 크기보다 1.7배 크다. 이러한 조건에서 InfiniGen은 FlexGen 대비 1.34×의 속도 향상을 보인다[p.10][p.12]"
+    ],
+    "apply_conditions": [
+      "InfiniGen는 기존 모델에 적용할 때 재학습, 보정 데이터, 전용 하드웨어, 사전 계산, 하이퍼파라미터 조정에 대한 별도의 언급 없이, Open Pre-trained Transformer (OPT) 모델들과 Llama-2 모델들에 적용되었다[p.9]",
+      "구체적으로 OPT 모델의 6.7B, 13B, 30B 파라미터 모델과 Llama-2의 7B, 13B 모델에 적용되어 다양한 모델 아키텍처에서 효과적으로 작동함이 확인되었다[p.9]"
+    ],
+    "overview": "InfiniGen는 긴 텍스트 생성에 최적화된 새로운 KV 캐시 관리 프레임워크로, 현대의 오프로드 기반 LLM 서빙 시스템과 시너지 효과를 내며 작동한다. 이 기술은 Transformer의 다음 어텐션 레이어 계산에 필수적인 일부 중요한 토큰들을 현재 레이어의 입력과 다음 레이어의 쿼리 가중치 및 키 캐시 일부를 사용한 최소한의 리허설로 추측하여, GPU에 필요한 KV 캐시의 핵심 부분만을 사전 가져오기(prefetch)할 수 있게 한다. 이를 통해 KV 캐시의 선형적인 크기 증가 문제를 해결하고, 성능 저하를 완화하면서도 이점을 유지하는 지능적인 KV 캐시 관리가 가능하다[p.1][p.2][p.4].",
+    "mechanism": "InfiniGen는 Transformer의 각 레이어 i에서 주의(attention) 계산을 위해 CPU 메모리에서 필수적인 KV cache 항목을 사전 가져오기(prefetch)한다. 이때 추측된(attention) 패턴을 기반으로 하여 필요한 KV cache 항목만 GPU로 가져와 KV cache 전송 오버헤드를 크게 줄인다. 또한, 자주 사용되지 않는 토큰의 KV cache 항목을 동적으로 제거하여 KV cache 풀을 관리한다. 피해자 선택 정책으로는 FIFO와 LRU를 고려하며, FIFO는 구현이 쉽지만 정확도 하락이 크고, LRU는 정확도 감소가 적으나 오버헤드가 크다. InfiniGen은 현재 레이어의 입력과 다음 레이어의 쿼리 가중치 및 키 캐시 일부를 사용하여 중요한 토큰을 최소한의 리허설로 추측함으로써 사전 가져오기를 수행한다[p.1][p.2][p.9][p.14].",
     "evidence": [
-      {"claim": "up to 3.00x speedup over prior offloading", "tag": "논문", "ref": "2406.19707", "page": 9}
+      {
+        "claim": "In summary, this paper makes the following contributions:\n• We present InfiniGen, a dynamic KV cache management framework that synergistically works with modern offloading-based LLM serving systems by intelligently managing the KV cache in the CPU memory.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 2
+      },
+      {
+        "claim": "In this paper, we present InfiniGen, a novel KV cache management framework tailored for long-text generation, which synergistically works with modern offloading-based inference systems. InfiniGen leverages the key insight that a few important tokens that are essential for computing the subsequent attention layer in the Transformer can be speculated by performing a minimal rehearsal with the inputs of the current layer and part of the query weight and key cache of the subsequent layer. This allows us to prefetch only",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 1
+      },
+      {
+        "claim": "does not serve as a fundamental solution as quantization does not address the root cause of the KV cache problem, which is the linear scaling of KV entries with the sequence length. This necessitates intelligent KV cache management to mitigate the performance overhead while preserving its benefits.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 4
+      },
+      {
+        "claim": "Based on the speculated attention pattern, InfiniGen prefetches the essential KV cache entries from the CPU memory for attention computation at Layer i. By dynamically adjusting the number of KV entries to prefetch, InfiniGen brings only the necessary amount of the KV cache to the GPU, thereby greatly reducing the overhead of the KV cache transfer. In addition, InfiniGen manages the KV cache pool by dynamically removing the KV cache entries of infrequently used tokens.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 2
+      },
+      {
+        "claim": "In this paper, we present InfiniGen, a novel KV cache management framework tailored for long-text generation, which synergistically works with modern offloading-based inference systems. InfiniGen leverages the key insight that a few important tokens that are essential for computing the subsequent attention layer in the Transformer can be speculated by performing a minimal rehearsal with the inputs of the current layer and part of the query weight and key cache of the subsequent layer. This allows us to prefetch only",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 1
+      },
+      {
+        "claim": "The policy of selecting a victim is important since it directly impacts model accuracy. We consider a counter-based policy along with two widely used software cache eviction policies: FIFO [7, 69, 70] and Least-Recently-Used (LRU) [2]. The FIFO-based policy is easy to implement with low overhead but results in a relatively large accuracy drop since it simply evicts the oldest residing token. The LRU-based policy generally exhibits a smaller decrease in accuracy but often entails a",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 9
+      },
+      {
+        "claim": "InfiniGen complements the KV cache management to reduce the data transfer overhead, which is a major bottleneck in offloading-based systems.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 14
+      },
+      {
+        "claim": "InfiniGen, on the other hand, considerably improves the inference speed over FlexGen by reducing the amount of data transfer with our dynamic KV cache prefetching. Furthermore, InfiniGen is only 1.52× slower than Ideal, while others show 3.90×-18.55× slowdowns.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 13
+      },
+      {
+        "claim": "We use Open Pre-trained Transformer (OPT) models [77] with 6.7B, 13B, and 30B parameters for evaluation. The 7B and 13B models of Llama-2 [60] are also used to demonstrate that InfiniGen works effectively across different model architectures.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 9
+      },
+      {
+        "claim": "InfiniGen shows substantially shortened inference latency while preserving language model performance. It also shows much better scalability regarding the batch size, sequence length, and model size compared to prior solutions.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 14
+      },
+      {
+        "claim": "For relative KV cache sizes larger than 10%, the accuracy with InfiniGen closely matches that of the full-cache baseline. In some cases, InfiniGen even shows slightly better accuracy than the full-cache baseline. This is likely because reducing the amount of the KV cache",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 10
+      },
+      {
+        "claim": "For the 30B model, the model parameters do not fit in the GPU memory. As such, we offload 30% of the model parameters to the CPU. In this case, the size of the offloaded parameters is 1.7× larger than the KV cache size. Even so, InfiniGen shows a 1.34× speedup over FlexGen, while others achieve 1.18× and 1.28× each.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 12
+      },
+      {
+        "claim": "We use Open Pre-trained Transformer (OPT) models [77] with 6.7B, 13B, and 30B parameters for evaluation. The 7B and 13B models of Llama-2 [60] are also used to demonstrate that InfiniGen works effectively across different model architectures.",
+        "tag": "논문",
+        "ref": "2406.19707",
+        "page": 9
+      }
     ]
   }
 }
