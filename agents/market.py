@@ -33,7 +33,7 @@ def _evaluate(response: MarketResponse, sources: dict) -> tuple[dict, list]:
     for name, axis in (("채택", response.adoption), ("시장 연결", response.market_connection),
                        ("생태계", response.ecosystem)):
         reason = grounding.claim(axis.reason)
-        grade = axis.grade if reason else "근거 없음"
+        grade = axis.grade if reason and axis.reason.source_url else "근거 없음"
         grades.append(f"{name}: {grade}")
         reasons.append(f"{name}: {reason or '유효한 근거 없음 [추론]'}")
     positives = grounding.claims(response.positives)

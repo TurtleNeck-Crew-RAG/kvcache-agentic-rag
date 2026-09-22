@@ -46,7 +46,7 @@ def search_client():
 def generator(schema):
     from agents._common import llm
 
-    return llm("generator").model_copy(update={"max_retries": 0}).with_structured_output(schema)
+    return llm("generator").with_structured_output(schema)
 
 
 def search(queries: list[str]) -> tuple[dict[str, dict], list[str]]:

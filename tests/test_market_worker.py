@@ -70,6 +70,19 @@ def test_missing_input_does_not_silently_use_fixtures(monkeypatch):
     assert all(e["grade"] == "평가 불가" for e in result["market_eval"].values())
 
 
+def test_inference_alone_cannot_assert_market_grade(monkeypatch):
+    def inferred(payload):
+        result = response(payload)
+        result["adoption"] = {"grade": "상", "reason": {
+            "text": "공식 도입 여부는 확인되지 않았다", "source_url": None, "quote": "",
+        }}
+        return result
+
+    install(monkeypatch, inferred)
+    result = market.run(state())
+    assert all("채택: 근거 없음" in e["grade"] for e in result["market_eval"].values())
+
+
 @pytest.mark.parametrize("kind", ["empty", "search_error", "llm_error", "parse_error"])
 def test_failures_produce_nonempty_state_and_count_attempts(monkeypatch, kind):
     install(monkeypatch, response)
