@@ -53,7 +53,7 @@
 설계 그림(위)과 `python -m graph.build` 가 그린 컴파일 결과([graph_compiled.png](docs/images/graph_compiled.png))가 같다 — 워커 6개가 전부 `dispatcher` 로 수렴하고, 조건부 엣지가 7갈래(+END)로 나간다.
 
 인덱싱 → ① 기술 조사 → ② 평가 3개 병렬(fan-out, 분리 키) → ③ 종합 + 중립성 Judge → ④ 보고서.
-Loop: 관련성 재작성 ≤1(RAG 노드 내부) · 반대 근거 부족 ≤2 · 중립성 반려 ≤2. `llm_calls > 100` 이면 재호출 중단.
+Loop: 관련성 재작성 ≤1(RAG 노드 내부) · 반대 근거 부족 ≤2 · 중립성 반려 ≤2. `llm_calls > 150` 이면 재호출 중단 (설계 100 → #29 로 상향).
 
 RAG 파이프라인: [전처리](docs/images/pipeline_pre.png) · [검색·관련성](docs/images/pipeline_ret.png) · [생성·사실성](docs/images/pipeline_gen.png)
 
