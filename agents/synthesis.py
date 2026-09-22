@@ -22,8 +22,11 @@ SOURCE_TAG = re.compile(r"\[(?:논문|웹|추론|p\.\d)[^\]]*\]")   # [논문 p.
 
 
 def _require_source_tag(value: str) -> str:
-    if "근거 없음" not in value and not SOURCE_TAG.search(value):   # "…(논문에 근거 없음)." 도 근거 없음 기록으로 인정
-        raise ValueError("판단 문장에 출처 태그가 필요합니다")
+    """태그 없는 판단 문장은 거부하지 않고 ' [추론]' 을 붙여 집계한다 (장치 6: 근거 없는 판단 = 추론).
+    raise 하면 pydantic 이 워커 출력 전체를 거부 → safe 래퍼가 실패 기록으로 대체 → 보고서에서 관점이 통째로 빠진다
+    (#40 이후에도 통합 실행에서 synthesis agreements/conflicts 3문장 때문에 5장 공백 발생)."""
+    if value.strip() and "근거 없음" not in value and not SOURCE_TAG.search(value):
+        return value.rstrip() + " [추론]"
     return value
 
 

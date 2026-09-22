@@ -187,7 +187,7 @@ def test_domain_output_requires_two_tagged_negatives():
     with pytest.raises(ValueError, match="at least 2"):
         domain.DomainEvaluationOutput.model_validate(data)
 
+    # 태그 없는 문장은 거부하지 않고 [추론] 으로 집계 (거부하면 워커 전체가 실패 기록으로 대체됨)
     data = _evaluation("KIVI").model_dump()
     data["negatives"][0] = "출처가 없는 한계"
-    with pytest.raises(ValueError, match="출처 태그"):
-        domain.DomainEvaluationOutput.model_validate(data)
+    assert domain.DomainEvaluationOutput.model_validate(data).negatives[0] == "출처가 없는 한계 [추론]"
