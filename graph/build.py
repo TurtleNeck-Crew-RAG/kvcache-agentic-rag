@@ -9,6 +9,7 @@ from langgraph.graph import END, StateGraph
 
 from agents import domain, market, report, stakeholder, synthesis, tech_research
 from graph.dispatcher import dispatcher, route
+from graph.safe import safe
 from graph.state import GraphState
 
 WORKERS = {
@@ -25,7 +26,7 @@ def build_graph():
     g = StateGraph(GraphState)
     g.add_node("dispatcher", dispatcher)
     for name, fn in WORKERS.items():
-        g.add_node(name, fn)
+        g.add_node(name, safe(name, fn))        # 예외 → 자기 키의 실패 기록 (graph/safe.py)
         g.add_edge(name, "dispatcher")          # 전부 dispatcher 로 수렴
 
     g.set_entry_point("dispatcher")

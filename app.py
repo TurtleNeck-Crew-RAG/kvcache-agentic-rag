@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -84,9 +83,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if state.get("report_md"):
         from agents import report  # weasyprint 는 선택 의존성 — 여기서만 import
-        if args.pdf_name:
-            os.environ["REPORT_PDF_NAME"] = args.pdf_name
-        report.save(state["report_md"])
+        md = report.OUT_DIR / "report.md"
+        if not md.exists() or md.read_text(encoding="utf-8") != state["report_md"]:
+            report.save(state["report_md"])       # 워커가 실패 기록(fallback)이라 저장을 못 했을 때만
     else:
         print("report_md 없음 — outputs/run.json 의 visited · error 확인", file=sys.stderr)
 

@@ -8,6 +8,7 @@ from agents.report_render import (
     format_ref,
     is_cited,
     limitation_stats,
+    metrics_from_eval,
     render_evaluation,
     render_limitations,
     render_reference,
@@ -78,6 +79,25 @@ def test_selection_renders_criteria_and_excluded():
     assert "**L** — Q?" in md and "DeepSeek-V2 MLA (SW) — 재학습" in md and "15p" in md
 
 
+def test_limitation_stats_counts_evidence_dicts_and_inline_p_tags():
+    """워커 실출력 형식(실측 2026-09-22 3회차): 태그는 evidence[].tag 에, 수치 문장에는 [p.2] 만 붙는다."""
+    s = init_state({}, {})
+    s["tech_summary"] = {"KIVI": {"overview": "태그 없음", "mechanism": "", "numbers": ["2.6× 감소[p.2][p.1]"],
+                                  "limitations": [], "apply_conditions": [],
+                                  "evidence": [{"claim": "c1", "tag": "논문", "ref": "2402.02750", "page": 2},
+                                               {"claim": "c2", "tag": "추론", "ref": "", "page": None}]}}
+    s["synthesis"] = {"matrix": {}, "agreements": [], "conflicts": ["종합 워커 실패 — x [추론]"]}
+    st = limitation_stats(s)
+    assert st["tagged_total"] == 4            # [p.N] 문장 1 + evidence 2 + conflicts 1
+    assert st["inference_only"] == 2 and st["inference_ratio"] == 0.5
+
+
+def test_is_failed_detects_safe_fallback():
+    from agents.report_render import is_failed
+    assert is_failed({"conflicts": ["종합 워커 실패 — NotImplementedError [추론]"]})
+    assert not is_failed({"conflicts": ["KIVI 손실 해석 차이 [추론]"]}) and not is_failed(None)
+
+
 def test_limitation_stats_and_rendering():
     s = _full_state()
     s["retrieval_log"] = [
@@ -101,3 +121,25 @@ def test_assemble_order_summary_first_reference_last():
     assert heads[0] == "## SUMMARY" and heads[-1] == "## REFERENCE"
     assert len(heads) == len(CHAPTERS)
     assert "_(작성되지 않음)_" in md                           # 빠진 장은 표시만, 목차는 유지
+
+
+def test_metrics_from_eval_maps_adopted_mode_and_ragas_keys():
+    ev = {
+        "retrieval": {
+            "dense/ko": {"hit@4": 0.55, "mrr@4": 0.4, "miss": [4]},
+            "dual-bm25/ko(dense)+en(sparse)": {"hit@4": 0.8, "mrr@4": 0.52, "miss": [3, 8]},
+        },
+        "rewrite": {"total": 10, "rewritten": 3, "rescued": 3, "still_no_evidence": 0},
+        "ragas": {"faithfulness": 0.936, "answer_relevancy": 0.838, "llm_context_precision_without_reference": 0.912},
+    }
+    m = metrics_from_eval(ev)
+    assert m["mode"] == "dual-bm25/ko(dense)+en(sparse)" and m["hit@4"] == 0.8 and m["mrr@4"] == 0.52
+    assert m["ragas"] == {"faithfulness": 0.936, "response_relevancy": 0.838, "context_precision": 0.912}
+    md = render_limitations(_full_state(), None, m)
+    assert "Hit Rate@4 0.8" in md and "ResponseRelevancy 0.838" in md and "ContextPrecision 0.912" in md
+    assert "dual-bm25/ko(dense)+en(sparse)" in md
+
+
+def test_metrics_from_eval_falls_back_to_best_mode():
+    m = metrics_from_eval({"retrieval": {"a": {"hit@4": 0.3, "mrr@4": 0.2}, "b": {"hit@4": 0.6, "mrr@4": 0.5}}})
+    assert m["mode"] == "b" and m["hit@4"] == 0.6 and m["ragas"] == {}

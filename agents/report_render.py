@@ -11,7 +11,8 @@ import re
 from typing import Any
 
 TECHS = ("KIVI", "InfiniGen")
-TAG_RE = re.compile(r"\[(논문|웹|추론)[^\]]*\]")
+TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d)[^\]]*\]")     # [논문 p.N] · [웹 URL] · [추론] · [p.N](논문)
+FAIL_MARK = "워커 실패"                                        # graph/safe.py fallback 이 남기는 표식
 
 CHAPTERS = (           # (key, 제목) — 이 순서가 목차다. SUMMARY 맨 앞 · REFERENCE 맨 뒤 고정
     ("summary", "SUMMARY"),
@@ -43,7 +44,7 @@ def is_cited(ref: dict[str, Any], body: str) -> bool:
         return True
     if ref["title"] and ref["title"] in body:
         return True
-    if ref["type"] == "논문" and "[논문" in body:
+    if ref["type"] == "논문" and ("[논문" in body or re.search(r"\[p\.\d", body)):
         return True
     return False
 
@@ -148,15 +149,27 @@ def render_evaluation(state: dict[str, Any]) -> str:
 
 # ---------- 6. 한계점 — 수치 계산 ----------
 
-def _tagged_statements(state: dict[str, Any]) -> list[str]:
-    """출처 태그가 붙은 판단 문장을 전부 모은다 (evals · tech_summary · synthesis)."""
-    found: list[str] = []
+def _tag_kind(t: str) -> str:
+    return "논문" if t.startswith("p.") else t
+
+
+def _tagged_statements(state: dict[str, Any]) -> list[tuple[str, set[str]]]:
+    """출처 태그가 붙은 판단 문장을 (문장, {태그 종류}) 로 모은다.
+
+    두 형식을 다 센다 — 문장 안 인라인 태그(`[논문 p.7]` · `[p.2]` · `[추론]`)와
+    `Evidence` dict(`{"claim", "tag", ...}` — 워커 실출력은 태그를 여기에 둔다).
+    """
+    found: list[tuple[str, set[str]]] = []
 
     def walk(x: Any) -> None:
         if isinstance(x, str):
-            if TAG_RE.search(x):
-                found.append(x)
+            tags = {_tag_kind(t) for t in TAG_RE.findall(x)}
+            if tags:
+                found.append((x, tags))
         elif isinstance(x, dict):
+            if "claim" in x and "tag" in x:               # Evidence dict
+                found.append((str(x.get("claim", "")), {str(x["tag"])}))
+                return
             for v in x.values():
                 walk(v)
         elif isinstance(x, list):
@@ -168,9 +181,20 @@ def _tagged_statements(state: dict[str, Any]) -> list[str]:
     return found
 
 
+def is_failed(value: Any) -> bool:
+    """graph/safe.py 의 fallback 인가 (rationale · conflicts · basis 에 FAIL_MARK)."""
+    return FAIL_MARK in json_dumps(value)
+
+
+def json_dumps(value: Any) -> str:
+    import json
+    return json.dumps(value, ensure_ascii=False) if value is not None else ""
+
+
 def limitation_stats(state: dict[str, Any]) -> dict[str, Any]:
-    stmts = _tagged_statements(state)
-    inference_only = [s for s in stmts if TAG_RE.findall(s) and all(t == "추론" for t in TAG_RE.findall(s))]
+    tagged = _tagged_statements(state)
+    stmts = [s for s, _ in tagged]
+    inference_only = [s for s, tags in tagged if tags == {"추론"}]
     log = state.get("retrieval_log") or []
     rewritten = [r for r in log if r.get("rewritten")]
     return {
@@ -194,6 +218,7 @@ def render_limitations(state: dict[str, Any], stats: dict[str, Any] | None = Non
     ratio = "계산 불가(태그 문장 없음)" if st["inference_ratio"] is None else f"{st['inference_ratio']:.0%} ({st['inference_only']}/{st['tagged_total']})"
     hit = m.get("hit@4", "TBD")
     mrr = m.get("mrr@4", "TBD")
+    mode = f" (검색 구성 `{m['mode']}`, 20문항)" if m.get("mode") else ""
     ragas = m.get("ragas") or {}
     rewrite = (f"재작성 {st['rewritten']}건 중 {st['rewrite_recovered']}건이 관련 문서를 찾았다"
                if st["rewritten"] else "재작성이 발생하지 않았다")
@@ -206,9 +231,37 @@ def render_limitations(state: dict[str, Any], stats: dict[str, Any] | None = Non
         "2. **TRL 기준 시점** — arXiv v1 과 학회 게재·가이드 표기 시점이 논문마다 다르다(KIVI: v1 2024-02 / ICML 2024-07, InfiniGen: v1 2024-06 / OSDI 2024-07). 기준 시점에 따라 추정이 달라진다 — 발표 시점과 채택 간 시차의 구체 사례다.",
         "3. **사전 가설과 확증편향 방지 조치** — 사전 가설 *\"온디바이스에서는 SW 압축이 더 적합할 것\"* 을 명시하고 장치 8개(기술별 독립 호출 · 사실 단위 질의 · 정확도 임계값 없음 · 근거 없음 기록 · 출처 태그 강제 · 반대 근거 ≥2 · 중립성 검증 루프)를 적용했다. 판정 기준(재학습 불필요 · 전용 HW 불필요)은 배포 용이성에 가중을 두므로 구조적으로 SW 접근에 유리하다 — 도메인의 실제 제약을 반영한 것이지만 기준 선택 자체가 결과에 영향을 준다. Memory · Recall · Latency 3축은 판정이 아닌 해석에만 썼다." + viol_line,
         f"4. **`[추론]` 태그 비율** — 판단 문장 {st['tagged_total']}건 중 논문·웹 근거 없이 추론에만 의존한 문장 {ratio}.",
-        f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다.",
+        f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr}{mode} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다.",
         f"6. **질의 재작성 효과** — {rewrite}. 효과가 없으면 재작성 단계 제거를 검토한다.",
     ])
+
+
+# ---------- 6장 5번 — A 의 rag.evaluate 출력(outputs/eval.json) 매핑 ----------
+
+ADOPTED_MODE = "dual-bm25/ko(dense)+en(sparse)"     # #27 실측에서 채택된 검색 구성 (README Tech Stack 과 같은 값)
+_RAGAS_KEYS = {                                      # ragas 컬럼명 → 설계서 3.4 표기
+    "faithfulness": "faithfulness",
+    "answer_relevancy": "response_relevancy",
+    "llm_context_precision_without_reference": "context_precision",
+}
+
+
+def metrics_from_eval(ev: dict[str, Any]) -> dict[str, Any]:
+    """rag.evaluate 가 쓴 eval.json → render_limitations 의 retrieval_metrics.
+
+    채택 구성(ADOPTED_MODE)이 있으면 그것을, 없으면 Hit@4 가 가장 높은 구성을 쓴다. 어느 구성인지 `mode` 로 남긴다.
+    """
+    retr = ev.get("retrieval") or {}
+    mode = ADOPTED_MODE if ADOPTED_MODE in retr else (max(retr, key=lambda m: retr[m].get("hit@4", -1)) if retr else None)
+    out: dict[str, Any] = {"mode": mode}
+    if mode:
+        out["hit@4"] = retr[mode].get("hit@4", "TBD")
+        out["mrr@4"] = retr[mode].get("mrr@4", "TBD")
+    ragas = ev.get("ragas") or {}
+    out["ragas"] = {_RAGAS_KEYS.get(k, k): v for k, v in ragas.items()}
+    if ev.get("rewrite"):
+        out["rewrite"] = ev["rewrite"]           # {total, rewritten, rescued, still_no_evidence}
+    return out
 
 
 # ---------- 조립 ----------
