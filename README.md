@@ -100,19 +100,22 @@ uv run pytest                    # 단위 테스트
 - 민영은 : 문제 정의·도메인 설정, 도메인 평가 Agent, 평가 종합 Agent, 확증편향 방지 장치·중립성 Judge
 - 황재원 : State Schema · Dispatcher · Graph 설계/구현, 보고서 생성 Agent, md→PDF, README 취합·발표
 
-## Run Record — 전체 실행 (2026-09-22)
+## Run Record — 전체 실행 (2026-09-22, 7회차 = 제출본)
 
 | 항목 | 값 |
 |---|---|
-| 실행 | `uv run python app.py --skip-index --pdf-name "RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf"` (main `ea27e89`) |
-| 경로 | `tech_research → market \| stakeholder \| domain → synthesis → report → END` — 설계서 5.3 규칙표 순서 그대로 |
-| LLM 호출 | **102회** (상한 150 — 설계 100 에서 #29 로 상향) · 재시도 `{} (반대 근거·중립성 모두 1회에 충족)` |
+| 실행 | `uv run python app.py --skip-index --pdf-name "RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf"` — 그래프 실행 main `ea27e89`, 보고서 장은 같은 State 로 `0fc5d0d`(REFERENCE 논문 승격) 에서 재생성 |
+| 경로 | `tech_research → market \| stakeholder \| domain → synthesis → report → END` — 설계서 5.3 규칙표 순서 그대로, 안전 래퍼 발동 0 |
+| LLM 호출 | **102회** (상한 150 — 설계 100 에서 #29 로 상향) · 재시도 `{}` (반대 근거 ≥2 · 중립성 모두 1회에 충족) · 보고서 재생성 +4회 |
 | 소요 · 비용 | 186초 (BGE-M3 로드 포함, 인덱스 재사용) · 약 **$0.15/실행** — mini 102회, 호출당 입력 2K · 출력 0.5K 토큰 가정(설계서 3.6 계산식). 임베딩은 로컬이라 0 |
-| 검색 | 20회 중 관련 16 · 근거 없음 4 · 재작성 9 |
-| 판정 | 도메인 KIVI **적합** / InfiniGen **조건부** · TRL 4 / 3 · 종합 엇갈림 4 · 일치 3 · 중립성 `pass` |
-| 보고서 | `[추론]` 비율 5% (7/145) · REFERENCE 11건(논문 + 웹, 인용된 것만) · [report.md](outputs/report/report.md) · [PDF](outputs/report/RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf) |
+| 검색 품질 | Hit Rate@4 **0.8** · MRR@4 **0.52** (20문항, `dual-bm25/ko(dense)+en(sparse)`) · RAGAS Faithfulness **0.936** · ResponseRelevancy **0.838** · ContextPrecision **0.912** — [experiments/sparse_compare/eval.json](experiments/sparse_compare/eval.json) |
+| 이번 실행의 검색 | 20회(기술 조사 10 · 도메인 10) 중 관련 16 · 근거 없음 4 · 재작성 9 |
+| 시장 | KIVI 채택: 중 / 시장 연결: 중 / 생태계: 중 (+3 −2) · InfiniGen 채택: 근거 없음 / 시장 연결: 근거 없음 / 생태계: 상 (+0 −1) — 자료가 없는 것도 결과로 기록(설계서 4.2) |
+| 이해관계자 | KIVI 경쟁 기술 진영: 중립 / 도입 기업·개발자: 우호 / 투자·미디어: 근거 없음 (+4 −2) · InfiniGen 경쟁 기술 진영: 중립 / 도입 기업·개발자: 우호 / 투자·미디어: 근거 없음 (+5 −4) — 두 기술 모두 반대 근거 ≥2 확보 |
+| 도메인 · 종합 | 도메인 KIVI **적합** (+2 −2) / InfiniGen **조건부** (+2 −3) · TRL 4 / 3 · 종합 엇갈림 4 · 일치 3 · 중립성 `pass` |
+| 보고서 | 16,505자 · A4 10쪽 · `[추론]` 비율 **5% (7/145)** · REFERENCE **8건**(논문 3 — 선정 2편 + 웹검색이 긁어 온 arXiv 1편을 API 메타로 승격 · 웹 5, 본문에 인용된 것만) · [report.md](outputs/report/report.md) · [PDF](outputs/report/RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf) |
 
-실행마다 결과가 달라진다(검색 · LLM 비결정성). 위는 제출본을 만든 실행이고, `outputs/run.json` 에 같은 항목이 남는다. 이전 6회 실행의 경과는 [#6](https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/issues/6) 코멘트에 있다.
+실행마다 결과가 달라진다(검색 · LLM 비결정성). 위는 제출본을 만든 실행이고, `outputs/run.json` 에 같은 항목이 남는다. 이전 6회 실행의 경과 — 1·2회 fan-out 형제 예외 → 3회 안전 래퍼로 END → 4회 첫 전체 실행(103회) → 5·6회 validator 회귀 2건 → 7회 완전 — 는 [#6](https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/issues/6) 코멘트에 있다.
 
 ## Presentation — 10분 (README 로만)
 
