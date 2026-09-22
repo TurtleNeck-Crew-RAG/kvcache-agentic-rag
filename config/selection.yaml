@@ -2,6 +2,7 @@
 # 선정 방식: 2안 Human — 조가 기준표로 6편 비교 후 선정 (설계서 3.2)
 sw:
   name: KIVI
+  authors: "Liu, Z., Yuan, J., Jin, H. et al."
   paper: "KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache"
   arxiv: "2402.02750"
   venue: "ICML 2024, PMLR 235"
@@ -12,6 +13,7 @@ sw:
 
 hw:
   name: InfiniGen
+  authors: "Lee, W., Lee, J., Seo, J., Sim, J."
   paper: "InfiniGen: Efficient Generative Inference of Large Language Models with Dynamic KV Cache Management"
   arxiv: "2406.19707"
   venue: "OSDI 2024"
