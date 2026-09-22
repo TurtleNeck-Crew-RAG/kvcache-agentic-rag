@@ -8,6 +8,7 @@ from agents.report_render import (
     format_ref,
     is_cited,
     limitation_stats,
+    metrics_from_eval,
     render_evaluation,
     render_limitations,
     render_reference,
@@ -101,3 +102,25 @@ def test_assemble_order_summary_first_reference_last():
     assert heads[0] == "## SUMMARY" and heads[-1] == "## REFERENCE"
     assert len(heads) == len(CHAPTERS)
     assert "_(작성되지 않음)_" in md                           # 빠진 장은 표시만, 목차는 유지
+
+
+def test_metrics_from_eval_maps_adopted_mode_and_ragas_keys():
+    ev = {
+        "retrieval": {
+            "dense/ko": {"hit@4": 0.55, "mrr@4": 0.4, "miss": [4]},
+            "dual-bm25/ko(dense)+en(sparse)": {"hit@4": 0.8, "mrr@4": 0.52, "miss": [3, 8]},
+        },
+        "rewrite": {"total": 10, "rewritten": 3, "rescued": 3, "still_no_evidence": 0},
+        "ragas": {"faithfulness": 0.936, "answer_relevancy": 0.838, "llm_context_precision_without_reference": 0.912},
+    }
+    m = metrics_from_eval(ev)
+    assert m["mode"] == "dual-bm25/ko(dense)+en(sparse)" and m["hit@4"] == 0.8 and m["mrr@4"] == 0.52
+    assert m["ragas"] == {"faithfulness": 0.936, "response_relevancy": 0.838, "context_precision": 0.912}
+    md = render_limitations(_full_state(), None, m)
+    assert "Hit Rate@4 0.8" in md and "ResponseRelevancy 0.838" in md and "ContextPrecision 0.912" in md
+    assert "dual-bm25/ko(dense)+en(sparse)" in md
+
+
+def test_metrics_from_eval_falls_back_to_best_mode():
+    m = metrics_from_eval({"retrieval": {"a": {"hit@4": 0.3, "mrr@4": 0.2}, "b": {"hit@4": 0.6, "mrr@4": 0.5}}})
+    assert m["mode"] == "b" and m["hit@4"] == 0.6 and m["ragas"] == {}

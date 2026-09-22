@@ -17,6 +17,7 @@ from agents._common import llm, load_prompt
 from agents.report_render import (
     assemble,
     limitation_stats,
+    metrics_from_eval,
     render_evaluation,
     render_limitations,
     render_reference,
@@ -26,7 +27,8 @@ from graph.state import GraphState
 
 TITLE = "KV cache 최적화 기술 다관점 평가 — KIVI(SW) · InfiniGen(HW) · 스마트폰 온디바이스 LLM"
 OUT_DIR = Path("outputs/report")
-METRICS_PATH = Path("outputs/retrieval_metrics.json")     # A 의 rag.evaluate 가 쓰면 6장 5번에 반영
+EVAL_PATH = Path("outputs/eval.json")                     # A 의 rag.evaluate 출력 (#27) → 6장 5번
+METRICS_PATH = Path("outputs/retrieval_metrics.json")     # 수동으로 넣을 때의 대체 경로 {"hit@4","mrr@4","ragas"}
 
 
 def _split_prompt(text: str) -> tuple[str, dict[str, str]]:
@@ -43,6 +45,14 @@ def _split_prompt(text: str) -> tuple[str, dict[str, str]]:
         else:
             chapters[cur].append(line)
     return "\n".join(common).strip(), {k: "\n".join(v).strip() for k, v in chapters.items()}
+
+
+def _load_metrics() -> dict[str, Any] | None:
+    if EVAL_PATH.exists():
+        return metrics_from_eval(json.loads(EVAL_PATH.read_text(encoding="utf-8")))
+    if METRICS_PATH.exists():
+        return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
+    return None
 
 
 def _pick(state: GraphState, *keys: str) -> dict[str, Any]:
@@ -66,7 +76,7 @@ def build_report(state: GraphState) -> tuple[str, int]:
     # State 만으로 만드는 장
     ch["selection"] = render_selection(state.get("selected") or {})
     ch["evaluation"] = render_evaluation(state)
-    metrics = json.loads(METRICS_PATH.read_text(encoding="utf-8")) if METRICS_PATH.exists() else None
+    metrics = _load_metrics()
     ch["limitations"] = render_limitations(state, limitation_stats(state), metrics)
 
     # LLM 이 쓰는 장 — 배경 · 개요 · 시사점
