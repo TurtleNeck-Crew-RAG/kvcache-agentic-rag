@@ -50,7 +50,17 @@ def test_reference_format_matches_design_example():
         "*Proceedings of the 41st International Conference on Machine Learning (ICML), PMLR 235*. arXiv:2402.02750."
     )
     web = _load("synthesis.json")["citations"][2]
-    assert format_ref(web).startswith("jy-yuan(") and format_ref(web).endswith("https://github.com/jy-yuan/KIVI")
+    assert format_ref(web).startswith("jy-yuan(2024 · 2026-09-22 접근)") and format_ref(web).endswith("https://github.com/jy-yuan/KIVI")
+
+
+def test_web_ref_unknown_author_uses_org_and_marks_accessed_date():
+    """B 워커 실출력(7회차): authors='저자 미상', year='연도 미상', accessed=오늘 → 기관명 + '게시일 미상 · 접근' 표기."""
+    gh = {"type": "웹", "authors": "저자 미상", "year": "연도 미상", "title": "GitHub - snu-comparch/InfiniGen",
+          "venue": "github.com", "id_or_url": "https://github.com/snu-comparch/InfiniGen", "accessed": "2026-09-22"}
+    assert format_ref(gh).startswith("snu-comparch(게시일 미상 · 2026-09-22 접근). ")
+    site = dict(gh, id_or_url="https://medium.com/@x/post", venue="medium.com", year="2025")
+    assert format_ref(site).startswith("medium.com(2025 · 2026-09-22 접근). ")
+    assert "저자 미상" not in format_ref(gh)
 
 
 def test_is_cited_web_requires_url_or_title():

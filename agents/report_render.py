@@ -60,7 +60,26 @@ def format_ref(ref: dict[str, Any]) -> str:
         # 출원인(YYYY-MM). *특허명*, 특허번호/공개번호, URL
         return f"{ref['authors']}({ref['year']}). *{ref['title']}*, {ref['id_or_url']}."
     # 기타(웹): 기관명 또는 작성자(YYYY-MM-DD). *제목*. 사이트명, URL
-    return f"{ref['authors']}({ref.get('accessed') or ref['year']}). *{ref['title']}*. {ref['venue']}, {ref['id_or_url']}"
+    # Tavily 는 저자·게시일을 주지 않는 경우가 많다 → 저자 미상이면 기관명(GitHub 소유자 / 사이트)으로, 날짜는 게시 연도가 있으면 연도,
+    # 없으면 "게시일 미상" 을 적고 접근일은 "접근" 을 붙여 게시일로 오해하지 않게 한다 (설계서 6장 스키마에 게시일 필드가 없음 — 한계점 5 기록)
+    author = _web_author(ref)
+    year = str(ref.get("year") or "")
+    when = year if year and "미상" not in year else "게시일 미상"
+    accessed = ref.get("accessed") or ""
+    date = f"{when} · {accessed} 접근" if accessed else when
+    return f"{author}({date}). *{ref['title']}*. {ref['venue']}, {ref['id_or_url']}"
+
+
+def _web_author(ref: dict[str, Any]) -> str:
+    author = str(ref.get("authors") or "").strip()
+    if author and "미상" not in author:
+        return author
+    url = str(ref.get("id_or_url") or "")
+    m = re.match(r"https?://(?:www\.)?github\.com/([^/]+)/", url)
+    if m:
+        return m.group(1)                          # GitHub 은 소유자를 작성자로 (설계서 예시 jy-yuan)
+    venue = str(ref.get("venue") or "")
+    return venue.removeprefix("www.") or "작성자 미상"
 
 
 def render_reference(citations: list[dict[str, Any]], body: str) -> str:
@@ -232,7 +251,7 @@ def render_limitations(state: dict[str, Any], stats: dict[str, Any] | None = Non
         "2. **TRL 기준 시점** — arXiv v1 과 학회 게재·가이드 표기 시점이 논문마다 다르다(KIVI: v1 2024-02 / ICML 2024-07, InfiniGen: v1 2024-06 / OSDI 2024-07). 기준 시점에 따라 추정이 달라진다 — 발표 시점과 채택 간 시차의 구체 사례다.",
         "3. **사전 가설과 확증편향 방지 조치** — 사전 가설 *\"온디바이스에서는 SW 압축이 더 적합할 것\"* 을 명시하고 장치 8개(기술별 독립 호출 · 사실 단위 질의 · 정확도 임계값 없음 · 근거 없음 기록 · 출처 태그 강제 · 반대 근거 ≥2 · 중립성 검증 루프)를 적용했다. 판정 기준(재학습 불필요 · 전용 HW 불필요)은 배포 용이성에 가중을 두므로 구조적으로 SW 접근에 유리하다 — 도메인의 실제 제약을 반영한 것이지만 기준 선택 자체가 결과에 영향을 준다. Memory · Recall · Latency 3축은 판정이 아닌 해석에만 썼다." + viol_line,
         f"4. **`[추론]` 태그 비율** — 판단 문장 {st['tagged_total']}건 중 논문·웹 근거 없이 추론에만 의존한 문장 {ratio}.",
-        f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr}{mode} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다.",
+        f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr}{mode} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다. 웹 출처는 Tavily 가 저자·게시일을 주지 않는 경우가 많아 REFERENCE 에 기관명(사이트)과 접근일로 대체했다 — 게시일이 필요한 항목은 사람이 확인해야 한다.",
         f"6. **질의 재작성 효과** — {rewrite}. 효과가 없으면 재작성 단계 제거를 검토한다.",
     ])
 
