@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
 from agents._common import llm, load_prompt
 from agents.report_render import (
+    arxiv_id_from_url,
     assemble,
     is_failed,
     limitation_stats,
     metrics_from_eval,
+    normalize_citations,
     render_evaluation,
     render_limitations,
     render_reference,
@@ -31,6 +35,7 @@ OUT_DIR = Path("outputs/report")
 EVAL_PATHS = (Path("outputs/eval.json"),                  # A 의 rag.evaluate 출력 (#27) → 6장 5번
               Path("experiments/sparse_compare/eval.json"))  # 리포에 커밋된 실측 사본 (outputs/ 는 git 제외)
 METRICS_PATH = Path("outputs/retrieval_metrics.json")     # 수동으로 넣을 때의 대체 경로 {"hit@4","mrr@4","ragas"}
+ARXIV_META_CACHE = Path("data/cache/arxiv_meta.json")    # arXiv API 응답 캐시 (git 제외) — 웹검색이 긁어 온 논문 페이지의 저자·게시일
 
 
 def _split_prompt(text: str) -> tuple[str, dict[str, str]]:
@@ -56,6 +61,39 @@ def _load_metrics() -> dict[str, Any] | None:
     if METRICS_PATH.exists():
         return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
     return None
+
+
+def _arxiv_meta(ids: list[str]) -> dict[str, dict[str, Any]]:
+    """export.arxiv.org API 로 저자·제목·게시일을 받는다. 캐시 우선, 실패하면 빈 dict (REFERENCE 는 제목·id 만으로 렌더링)."""
+    cache: dict[str, dict[str, Any]] = {}
+    if ARXIV_META_CACHE.exists():
+        try:
+            cache = json.loads(ARXIV_META_CACHE.read_text(encoding="utf-8"))
+        except Exception:                          # noqa: BLE001 — 캐시 손상은 무시하고 다시 받는다
+            cache = {}
+    missing = [i for i in dict.fromkeys(ids) if i not in cache]
+    if missing:
+        import urllib.request
+        import xml.etree.ElementTree as ET
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        url = "https://export.arxiv.org/api/query?id_list=" + ",".join(missing) + f"&max_results={len(missing)}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "kvcache-agentic-rag/0.1 (SKALA course project)"})
+            with urllib.request.urlopen(req, timeout=10) as r:            # noqa: S310 — 고정 도메인
+                root = ET.fromstring(r.read())
+            for e in root.findall("a:entry", ns):
+                eid = (e.findtext("a:id", default="", namespaces=ns) or "").rsplit("/", 1)[-1]
+                eid = re.sub(r"v\d+$", "", eid)
+                cache[eid] = {
+                    "title": " ".join((e.findtext("a:title", default="", namespaces=ns) or "").split()),
+                    "authors": [a.findtext("a:name", default="", namespaces=ns) for a in e.findall("a:author", ns)],
+                    "published": e.findtext("a:published", default="", namespaces=ns) or "",
+                }
+            ARXIV_META_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            ARXIV_META_CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
+        except Exception as e:                     # noqa: BLE001 — 네트워크 실패는 보고서를 막지 않는다
+            print(f"[report] arXiv 메타 조회 실패({type(e).__name__}) — 제목·id 로만 표기", file=sys.stderr)
+    return {i: cache[i] for i in ids if i in cache}
 
 
 def _pick(state: GraphState, *keys: str) -> dict[str, Any]:
@@ -99,7 +137,11 @@ def build_report(state: GraphState) -> tuple[str, int]:
 
     # REFERENCE — 본문(1~6장)에 인용된 것만
     body = "\n".join(ch[k] for k in ("background", "selection", "overview", "evaluation", "implications", "limitations"))
-    ch["reference"] = render_reference(state.get("citations") or [], body)
+    raw = state.get("citations") or []
+    ids = [a for a in (arxiv_id_from_url(str(c.get("id_or_url") or "")) for c in raw if c.get("type") == "웹") if a]
+    cites = normalize_citations(raw, state.get("selected") or {}, _arxiv_meta(ids) if ids else {})
+    corpus_ids = {str(p.get("arxiv")) for k in ("sw", "hw") for p in [(state.get("selected") or {}).get(k) or {}] if p.get("arxiv")}
+    ch["reference"] = render_reference(cites, body, corpus_ids)
 
     # SUMMARY — 맨 마지막, 본문 전체를 입력으로
     ch["summary"] = _write_chapter(common, instr["summary"], {"report_body": assemble(TITLE, {k: v for k, v in ch.items() if k != "summary"})})

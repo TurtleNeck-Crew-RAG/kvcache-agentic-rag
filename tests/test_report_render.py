@@ -36,10 +36,11 @@ def _full_state():
 def test_reference_excludes_uncited_and_dedups():
     cites = _load("synthesis.json")["citations"]
     body = "KIVI 는 2bit 양자화 [논문 p.1]. 구현은 https://github.com/jy-yuan/KIVI 참고 [웹 https://github.com/jy-yuan/KIVI]"
-    ref = render_reference(cites + [cites[0]], body)       # 중복 1건 추가
+    ref = render_reference(cites + [cites[0]], body, {"2402.02750", "2406.19707"})   # 중복 1건 추가 · 코퍼스 2편
     assert "미인용" not in ref                               # 본문에 없는 항목 제외
     assert ref.count("2402.02750") == 1                      # 중복 제거
-    assert "2406.19707" in ref                               # [논문] 태그가 있으면 선정 논문 2편은 인용으로 본다
+    assert "2406.19707" in ref                               # [논문] 태그가 있으면 코퍼스(선정) 논문 2편은 인용으로 본다
+    assert "2406.19707" not in render_reference(cites, body, set())   # 코퍼스로 지정하지 않으면 id·제목 매칭만
     assert "jy-yuan" in ref
 
 
@@ -51,6 +52,45 @@ def test_reference_format_matches_design_example():
     )
     web = _load("synthesis.json")["citations"][2]
     assert format_ref(web).startswith("jy-yuan(2024 · 2026-09-22 접근)") and format_ref(web).endswith("https://github.com/jy-yuan/KIVI")
+
+
+def test_normalize_promotes_arxiv_web_hits_to_papers_and_dedups():
+    """웹검색이 arxiv.org 를 긁어 온 항목(7회차: 5건)은 논문으로 승격하고 같은 논문은 하나로."""
+    from agents.report_render import arxiv_id_from_url, format_authors, normalize_citations
+    assert arxiv_id_from_url("https://arxiv.org/html/2402.02750v2") == "2402.02750"
+    assert arxiv_id_from_url("https://arxiv.org/pdf/2604.05012") == "2604.05012" and arxiv_id_from_url("https://github.com/x/y") is None
+    assert format_authors(["Keivan Alizadeh", "Iman Mirzadeh", "Dmitry Belenko", "Karen Khatamifard"]) == "Alizadeh, K., Mirzadeh, I., Belenko, D. et al."
+    selected = {"sw": {"name": "KIVI", "paper": "KIVI: A Tuning-Free …", "arxiv": "2402.02750", "venue": "ICML 2024, PMLR 235",
+                       "authors": "Liu, Z., Yuan, J., Jin, H. et al."}, "hw": {"arxiv": "2406.19707", "paper": "InfiniGen …",
+                       "venue": "OSDI 2024", "authors": "Lee, W. et al."}}
+    meta = {"2504.19874": {"title": "TurboQuant: Online Vector Quantization", "authors": ["Amir Zandieh", "Majid Daliri"],
+                           "published": "2025-04-28T15:05:35Z"}}
+    web = lambda url, title="t": {"type": "웹", "authors": "저자 미상", "year": "연도 미상", "title": title, "venue": "arxiv.org",  # noqa: E731
+                                  "id_or_url": url, "accessed": "2026-09-22"}
+    cites = [
+        {"type": "논문", "authors": "Liu, Z., Yuan, J., Jin, H. et al.", "year": "2024", "title": "KIVI: A Tuning-Free …",
+         "venue": "ICML 2024, PMLR 235", "id_or_url": "arXiv:2402.02750", "accessed": ""},
+        web("https://arxiv.org/html/2402.02750v2"),           # 선정 논문 → 기존 논문 항목과 합침
+        web("https://arxiv.org/abs/2406.19707"),              # 선정 논문(웹만 있음) → selection.yaml 메타로 승격
+        web("https://arxiv.org/pdf/2504.19874", "TurboQuant"),  # 풀 밖 논문 → arXiv API 메타로 승격
+        web("https://arxiv.org/pdf/2604.05012", "미지 논문"),   # 메타 없음 → 제목·id 만
+        {"type": "웹", "authors": "저자 미상", "year": "연도 미상", "title": "repo", "venue": "github.com",
+         "id_or_url": "https://github.com/jy-yuan/KIVI", "accessed": "2026-09-22"},
+    ]
+    out = normalize_citations(cites, selected, meta)
+    ids = [c["id_or_url"] for c in out]
+    assert ids == ["arXiv:2402.02750", "arXiv:2406.19707", "arXiv:2504.19874", "arXiv:2604.05012", "https://github.com/jy-yuan/KIVI"]
+    assert out[0]["venue"] == "ICML 2024, PMLR 235"                                    # 합쳐도 학회 정보 유지
+    assert out[1] == {"type": "논문", "authors": "Lee, W. et al.", "year": "", "title": "InfiniGen …", "venue": "OSDI 2024",
+                      "id_or_url": "arXiv:2406.19707", "accessed": "2026-09-22"}
+    assert out[2]["authors"] == "Zandieh, A., Daliri, M." and out[2]["year"] == "2025" and out[2]["venue"] == "arXiv"
+    assert format_ref(out[2]) == "Zandieh, A., Daliri, M.(2025). TurboQuant: Online Vector Quantization. *arXiv*. arXiv:2504.19874."
+    assert format_ref(out[3]).startswith("(저자 미확인)(연도 미확인). 미지 논문. *arXiv*. arXiv:2604.05012")
+    assert out[4]["type"] == "웹"                                                       # GitHub 은 그대로 웹
+    body = "본문 [웹 https://arxiv.org/pdf/2504.19874] 과 [논문 p.2]"
+    ref = render_reference(out, body, {"2402.02750", "2406.19707"})
+    assert "2504.19874" in ref and "2604.05012" not in ref                            # 풀 밖 논문은 id 가 본문에 있어야 인용
+    assert "2406.19707" in ref                                                        # 코퍼스 논문은 [논문 p.N] 태그로 인용
 
 
 def test_web_ref_unknown_author_uses_org_and_marks_accessed_date():

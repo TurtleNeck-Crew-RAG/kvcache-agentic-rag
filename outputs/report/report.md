@@ -2,15 +2,11 @@
 
 ## SUMMARY
 
-KV cache 최적화 기술인 KIVI(소프트웨어)와 InfiniGen(하드웨어)을 스마트폰 온디바이스 LLM 도메인에서 기술 성숙도, 시장, 이해관계자, 도메인 적합성 관점으로 비교했다. 기술 성숙도에서는 KIVI가 공개 논문과 구현체를 기반으로 TRL 4로 평가된 반면, InfiniGen은 TRL 3으로 평가되어 검증 범위 차이가 나타났다. 시장 관점에서는 KIVI가 인기 모델에 적용된 사례가 확인되나 InfiniGen은 채택과 시장 연결 근거가 부족해 평가가 엇갈렸다. 이해관계자 관점에서는 KIVI가 도입 기업과 개발자에게 긍정적 평가를 받는 반면, InfiniGen은 데이터 전송 병목과 정확도 저하 우려가 존재한다. 도메인 적합성에서는 KIVI가 재학습 없이 추가 하드웨어 요구 없이 스마트폰 환경에 적합하다고 판단되나, InfiniGen은 CPU 메모리 오프로딩과 PCIe 대역폭 전제가 스마트폰 환경과 맞지 않아 조건부 적합으로 평가되었다. 가장 큰 엇갈림은 도메인 적합성에서 InfiniGen의 하드웨어 전제와 실제 스마트폰 환경 부합 여부, 그리고 시장 채택 근거의 유무에서 나타난다. 본 보고서는 공개 정보 기반 추정에 의존하며, 판단 문장 중 약 5%가 `[추론]` 태그를 포함한다.
+KV cache 최적화 기술인 KIVI(소프트웨어)와 InfiniGen(하드웨어)을 스마트폰 온디바이스 LLM 도메인에서 기술 성숙도, 시장, 이해관계자, 도메인 적합성 관점으로 비교했다. 기술 성숙도에서는 KIVI가 TRL 4, InfiniGen이 TRL 3으로 평가되며 공개 정보 기반 추정임을 알 수 있다. 시장 관점에서 KIVI는 중간 수준의 채택과 생태계 연결 근거가 있으나, InfiniGen은 채택과 시장 연결 근거가 부족하다. 이해관계자 관점에서는 KIVI가 단순한 2비트 압축 기술로 평가받는 반면, InfiniGen은 데이터 전송 병목과 정확도 저하 가능성으로 제한적 평가를 받는다. 도메인 적합성에서는 KIVI가 스마트폰 온디바이스 환경에 적합한 반면, InfiniGen은 CPU 메모리 오프로딩과 PCIe 대역폭 전제를 요구해 조건부 적합으로 판단된다. 가장 큰 엇갈림은 두 기술이 요구하는 하드웨어 및 메모리 계층 전제 조건과 이로 인한 도메인 적합성 평가 차이에서 나타난다[논문 2402.02750 p.2, 2406.19707 p.4, p.6]. 본 보고서는 공개 정보 기반 추정에 의존하며, 판단 문장 중 약 5%가 `[추론]` 태그를 포함한다.
 
 ## 1. 분석 배경
 
-KV cache는 LLM 추론 시 토큰당 약 0.5MB(7B 모델, fp16, MHA 기준)의 메모리를 요구한다. 문맥 길이가 늘어날수록 KV cache 크기가 선형적으로 증가해, 초기의 연산 병목이 메모리 병목으로 전환되는 현상이 나타난다. 이로 인해 긴 문맥을 처리할 때 메모리 용량이 중요한 제약 요소가 된다. KV cache 최적화는 크게 두 가지 접근으로 나뉜다. 소프트웨어적 방법은 데이터 크기를 줄이기 위해 압축이나 양자화 기술을 활용하며, 하드웨어적 방법은 메모리나 스토리지 계층을 확장해 저장 공간을 넓히는 데 초점을 맞춘다.
-
-스마트폰 온디바이스 LLM 환경에서는 메모리 확장이 불가능하고 배터리 제약이 있으며, 모델 재학습도 지원되지 않는다. 또한 어시스턴트의 응답 품질이 제품 품질과 직결되어 압축 손실에 민감하다. 대표적인 시나리오로는 12GB RAM 환경에서 4bit로 양자화된 7B 모델을 사용해 8K 토큰 문맥을 처리할 때, fp16 KV cache가 약 4GB를 차지하는 경우가 있다. 이처럼 온디바이스 LLM은 메모리 용량이 절대적인 제약 조건으로 작용한다.
-
-KV cache 최적화는 Recall, Latency, Memory 세 축에서 균형을 맞추는 문제다. 이 세 가지를 동시에 최대한 달성하기 어렵고, 특히 온디바이스 환경에서는 메모리 절감이 가장 큰 제약으로 작용한다. 따라서 이 보고서는 어떤 성능 요소를 포기했는지, 그리고 그 포기가 스마트폰 온디바이스 LLM 도메인에서 감당 가능한 수준인지에 초점을 맞춘다.
+KV cache는 대규모 언어 모델(LLM)에서 토큰별 약 0.5MB(7B, fp16, MHA 기준)의 메모리를 요구하며, 문맥 길이가 늘어날수록 용량이 선형적으로 증가한다. 이로 인해 초기의 연산 병목이 점차 메모리 병목으로 전환되는 현상이 나타난다. 이러한 특성은 특히 메모리 자원이 제한적인 환경에서 문제를 심화시킨다. KV cache 최적화 접근법은 크게 두 가지로 구분된다. 첫째는 소프트웨어적 방법으로, 압축이나 양자화 등을 통해 저장 데이터를 줄이는 방식이며, 둘째는 하드웨어적 방법으로, 메모리나 스토리지 계층을 확장하여 저장 공간을 넓히는 방식이다. 스마트폰 온디바이스 LLM은 메모리 확장이 불가능하고 배터리 제약과 재학습 불가 조건이 존재한다. 또한, 어시스턴트 응답 품질이 제품 품질과 직결되므로 압축 손실에 민감하다. 대표적인 시나리오로는 12GB RAM 환경에서 4bit 7B 모델을 사용하며, 8K 토큰 문맥을 처리할 때 fp16 KV cache가 약 4GB를 차지하는 경우가 있다. 이 도메인에서는 Recall, Latency, Memory 세 축을 동시에 최적화하기 어렵고, 특히 메모리 제약이 절대적이다. 따라서 본 보고서는 각 최적화 기법이 무엇을 포기했으며, 그 포기가 스마트폰 온디바이스 LLM 환경에서 감당 가능한지를 평가하는 데 초점을 맞춘다.
 
 ## 2. 기술 선정
 
@@ -39,11 +35,18 @@ KV cache 최적화는 Recall, Latency, Memory 세 축에서 균형을 맞추는 
 
 ### KIVI
 
-KIVI는 긴 컨텍스트나 배치 추론 시 KV 캐시의 저장 및 로딩에서 발생하는 메모리와 속도 병목 문제를 완화하기 위해 KV 캐시의 총 바이트 수를 줄이는 2비트 양자화 방식을 적용한다. KV 캐시를 그룹 단위로 양자화하고, 잔여 부분은 원래 정밀도로 유지하여 긴 시퀀스에서 메모리 오버헤드를 최소화한다. 또한, 디퀀타이즈와 행렬 곱셈을 융합하는 혼합 정밀도 연산으로 효율성을 높인다. KIVI는 Llama-2-7B 모델에서 KV 캐시를 2비트로 압축해 최대 2.6배 피크 메모리 사용량 감소, 최대 4배 배치 크기 지원, 2.35배에서 3.47배 처리량 향상을 보였다[p.2][p.3][p.5][p.8][p.9][p.12]. 한계로는 2비트 양자화가 multi-query attention과 같이 KV 캐시가 하나의 헤드만 사용되는 경우 정확도 하락이 발생할 수 있어, 4비트 양자화가 필요할 때가 있다[p.6]. KIVI는 메모리 절감과 처리량 향상을 얻는 대신 일부 상황에서 정확도 유지에 어려움이 있을 수 있다[추론].
+KIVI는 긴 컨텍스트나 배치 추론 시 KV 캐시의 저장 및 로딩에서 발생하는 메모리와 속도 병목 현상을 완화하기 위해 KV 캐시를 2비트로 양자화하는 접근을 취한다. 이 기술은 key와 value 캐시를 그룹 단위로 양자화하고, 잔여 부분은 원래 정밀도로 유지하여 긴 시퀀스에서 메모리 오버헤드를 최소화한다. 또한, 디퀀타이즈와 행렬 곱셈을 융합하는 혼합 정밀도 행렬 곱셈(Q_MatMul)을 통해 효율성을 높인다. KIVI는 Llama, Mistral, Falcon 모델에서 평가되었으며, Llama-2-7B 모델에서 KV 캐시를 2비트로 압축해 2.6×의 피크 메모리 사용량 감소, 최대 4× 더 큰 배치 크기 지원, 2.35×∼3.47× 처리량 향상을 보였다[p.1][p.2][p.3][p.5][p.6][p.8][p.9][p.12].  
+한계로는 2비트 KIVI가 multi-query attention 환경에서 정확도 하락을 보일 수 있어, 4비트 KIVI가 필요한 경우가 있다는 점이 있다[p.6].  
+적용 시 재학습이나 보정 데이터, 전용 하드웨어, 사전 계산, 하이퍼파라미터 조정에 대한 별도 요구 없이 GPU에서 CUDA 및 Triton을 활용한 하드웨어 친화적 구현이 가능하며, Llama2-7B, 13B, Falcon-7B, Mistral-7B 등 다양한 모델에 적용되었다[p.6][p.8].  
+KIVI는 메모리 사용량과 처리량을 개선하는 대신 일부 상황에서 정확도(Recall)를 희생할 수 있는 특성을 가진다[추론].
 
 ### InfiniGen
 
-InfiniGen은 긴 텍스트 생성에 최적화된 KV 캐시 관리 프레임워크로, 오프로딩 기반 추론 시스템과 연계하여 CPU 메모리의 KV 캐시 중 중요한 토큰만을 추측적으로 미리 GPU로 가져온다. 이전 레이어의 attention 입력과 쿼리 및 키 가중치를 활용해 필수 KV 캐시 항목을 동적으로 선별하고, 불필요한 항목은 제거하여 전송 오버헤드를 줄인다. 이를 통해 KV 캐시의 선형 확장 문제를 완화하고 추론 지연 시간을 단축한다. InfiniGen은 OPT 6.7B, 13B, 30B 및 Llama-2 7B, 13B 모델에서 평가되었으며, FlexGen 대비 데이터 전송량 감소로 추론 속도를 크게 향상시키고, Ideal 대비 1.52배 느린 반면 다른 방법들은 3.90배에서 18.55배 느린 결과를 보였다[p.1][p.2][p.4][p.6][p.9][p.13][p.14]. 한계로는 KV 캐시 크기가 10% 이하로 작아질 경우 정확도가 떨어질 수 있으며, KV 캐시를 CPU에서 GPU로 전송하는 과정이 새로운 병목이 될 수 있다고 지적된다[p.1][p.10]. InfiniGen은 추론 지연 시간 단축과 확장성을 얻는 대신, KV 캐시 전송 과정에서 병목 가능성이 존재한다[추론].
+InfiniGen은 긴 텍스트 생성에 최적화된 KV 캐시 관리 프레임워크로, 오프로딩 기반 LLM 추론 시스템과 협력하여 CPU 메모리에 있는 KV 캐시 중 중요한 토큰만을 추측적으로 미리 GPU로 가져오는 방식을 사용한다. 이를 위해 이전 레이어의 attention 입력과 쿼리 및 키 가중치를 활용해 필수 KV 캐시 항목을 동적으로 선별하고, 미리 가져올 항목 수를 조절하며, 자주 사용되지 않는 항목은 동적으로 제거한다. 이로써 KV 캐시 전송 오버헤드를 줄이고 추론 지연 시간을 단축한다[p.1][p.2][p.4][p.6][p.14].  
+평가에서는 OPT 6.7B, 13B, 30B 및 Llama-2 7B, 13B 모델을 사용했으며, FlexGen 대비 데이터 전송량 감소로 추론 속도가 크게 향상되었고, Ideal 대비 1.52× 느린 반면 다른 방법들은 3.90×~18.55× 느린 결과를 보였다[p.9][p.13][p.14].  
+한계로는 KV 캐시 크기가 10%보다 작을 때 정확도가 떨어지는 경우가 있으며, 이는 양자화나 영구적인 KV 캐시 제거 때문이라고 언급된다. 또한 CPU에서 GPU로 KV 캐시를 전송하는 과정이 새로운 성능 병목이 될 수 있다[p.1][p.10].  
+재학습, 보정 데이터, 전용 하드웨어, 사전 계산, 하이퍼파라미터 조정 없이 기존 OPT 및 Llama-2 모델에 적용되었다[p.9].  
+InfiniGen은 추론 지연 시간을 줄이는 데 집중하면서도 정확도를 유지하는 대신, KV 캐시 전송량과 메모리 관리에 중점을 둔 접근으로 메모리와 지연 시간 간 균형을 추구한다[추론].
 
 ## 4. 관점별 평가
 
@@ -148,15 +151,15 @@ TRL 4~6 구간은 수율·성능 수치가 비공개라 정보 공백이 크고,
 
 ## 5. 시사점
 
-KIVI는 온디바이스 스마트폰 환경에 적합한 plug-and-play 2bit 양자화 기술로 평가된다. 이는 추가 하드웨어나 메모리 계층, 대역폭 전제를 요구하지 않고, 재학습이나 보정 데이터 없이 동작하는 점에서 스마트폰 배포 제약에 부합하는 것으로 해석된다. 반면 InfiniGen은 CPU 메모리 오프로딩과 PCIe 대역폭 관리가 전제되어 있어, 스마트폰 온디바이스 LLM 배포에 적합하지 않다는 평가가 나온다. 이러한 차이는 두 기술이 요구하는 하드웨어 및 시스템 환경의 차이에서 비롯된다[논문 2402.02750 p.2, 2406.19707 p.4, p.6]. 판단에 필요한 추가 확인 항목은 스마트폰 환경에서 PCIe 대역폭과 메모리 오프로딩이 실제로 추론 지연에 미치는 영향이다.
+KIVI는 스마트폰 온디바이스 환경에 적합한 plug-and-play 2bit 양자화 기술로 평가되는 반면, InfiniGen은 CPU 메모리 오프로딩과 PCIe 대역폭 전제를 요구하여 스마트폰 배포 제약에 부합하지 않는 것으로 해석된다. 이러한 차이는 두 기술이 목표로 하는 하드웨어 환경과 메모리 계층 구조에 대한 전제 조건의 차이에서 비롯된다. KIVI는 추가 하드웨어나 대역폭 요구 없이 동작하는 반면, InfiniGen은 CPU와 GPU 간 데이터 전송 병목 가능성을 내포한다는 점에서 도메인 적합성 평가가 엇갈린다[논문 2402.02750 p.2, 2406.19707 p.4, p.6]. 판단에 필요한 추가 확인 항목은 스마트폰 플래시 메모리 대역폭에서의 실제 프리패치 지연 실측이다.
 
-시장 및 채택 관점에서는 KIVI가 Llama, Falcon, Mistral 등 인기 모델 패밀리에 적용되어 평가되었고, HuggingFace Transformers의 KV Cache 양자화에 영향을 준 점이 중간 수준의 채택 근거로 제시된다. 반면 InfiniGen은 구현체가 공개되어 있으나 채택과 시장 연결에 대한 유효한 근거가 부족하여 평가가 엇갈린다. 이 차이는 공개된 적용 사례와 시장 반응의 유무에서 기인한다[추론]. 판단에 필요한 추가 확인 항목은 InfiniGen의 실제 산업 현장 적용 사례 및 시장 반응 데이터다.
+시장 및 채택 관점에서는 KIVI가 중간 수준의 채택과 시장 연결 근거를 갖추고 있으나, InfiniGen은 채택과 시장 연결에 대한 유효한 근거가 부족하여 평가가 엇갈린다. KIVI는 인기 모델 패밀리 적용과 HuggingFace Transformers에 영감을 준 점이 시장 수요와 연결되는 반면, InfiniGen은 구현체 공개에도 불구하고 실제 채택 사례나 벤더 제품 적용 발표가 확인되지 않아 시장 반응을 가늠하기 어렵다[추론]. 판단에 필요한 추가 확인 항목은 InfiniGen의 벤더 제품 적용 사례 및 실사용 데이터다.
 
-기술 성숙도(TRL) 평가에서는 KIVI가 공개 논문과 구현체가 모두 확인되어 TRL 4로 평가된다. InfiniGen은 공개 논문과 구현체만 확인되었으며, 재학습·보정 데이터 및 벤더 제품 적용 발표가 미확인되어 TRL 3으로 평가된다. 이 차이는 기술 검증 범위와 적용 증거의 차이에 따른 것이다[추론]. 판단에 필요한 추가 확인 항목은 InfiniGen의 재학습·보정 데이터 존재 여부와 벤더 제품 적용 발표의 확인이다.
+기술 성숙도(TRL) 평가에서는 KIVI가 공개 논문과 구현체가 모두 확인되어 TRL 4로 평가되는 반면, InfiniGen은 공개 논문과 구현체만 확인되고 재학습·보정 데이터 및 벤더 제품 적용 발표가 미확인되어 TRL 3으로 평가된다. 이 차이는 기술 검증 단계와 실용화 준비 정도에 대한 해석 차이에서 기인한다[추론]. 판단에 필요한 추가 확인 항목은 InfiniGen의 재학습 또는 보정 데이터 공개 여부다.
 
-이해관계자 관점에서는 KIVI가 경쟁 기술 대비 단순하고 직접적인 2bit 압축 기술로 도입 기업과 개발자에게 긍정적으로 평가된다. 반면 InfiniGen은 데이터 전송 병목과 정확도 저하 가능성으로 인해 제한적인 평가를 받는다. 이러한 엇갈림은 각 기술이 제공하는 성능 개선과 구현 복잡성, 정확도 유지 측면에서 이해관계자가 중시하는 요소가 다르기 때문이다[추론]. 판단에 필요한 추가 확인 항목은 InfiniGen의 데이터 전송 병목 현상과 정확도 저하 영향에 대한 실측 결과다.
+이해관계자 관점에서는 KIVI가 경쟁 기술 대비 단순하고 직접적인 2bit 압축 기술로 긍정적 평가를 받는 반면, InfiniGen은 데이터 전송 병목과 정확도 저하 가능성으로 인해 제한적인 평가를 받고 있다. 이는 두 기술이 추구하는 최적화 방향과 구현 복잡성, 정확도 보존 전략의 차이에서 비롯된다[추론]. 판단에 필요한 추가 확인 항목은 InfiniGen의 데이터 전송 병목 현상에 대한 실측 결과다.
 
-두 기술 모두 재학습이나 보정 데이터 없이 기존 모델에 적용 가능하다는 점, KV 캐시 관리의 중요성을 인지하고 메모리 사용량 및 처리량 개선을 목표로 한다는 점, 그리고 여러 인기 LLM 모델에서 평가되어 GPU 환경에서 효율성 개선을 추구한다는 점에서는 일치한다[논문 2402.02750 p.2, 2406.19707 p.1, p.9].
+두 기술 모두 재학습이나 보정 데이터 없이 기존 모델에 적용 가능하다는 점과 KV 캐시 관리의 중요성을 인지하며 메모리 사용량 및 처리량 개선을 목표로 한다는 점, 그리고 여러 인기 LLM 모델에서 평가되어 GPU 환경에서 효율성 개선을 추구한다는 점에서는 일치한다[논문 2402.02750 p.2, 2406.19707 p.1, p.9].
 
 ## 6. 한계점
 
@@ -171,12 +174,9 @@ KIVI는 온디바이스 스마트폰 환경에 적합한 plug-and-play 2bit 양�
 
 - Liu, Z., Yuan, J., Jin, H. et al.(2024). KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache. *Proceedings of the 41st International Conference on Machine Learning (ICML), PMLR 235*. arXiv:2402.02750.
 - Lee, W., Lee, J., Seo, J., Sim, J.(2024). InfiniGen: Efficient Generative Inference of Large Language Models with Dynamic KV Cache Management. *18th USENIX Symposium on Operating Systems Design and Implementation (OSDI)*. arXiv:2406.19707.
+- Mamo, O., Kogiou, O., Yi, H. et al.(2026). Comparative Characterization of KV Cache Management Strategies for LLM Inference. *arXiv*. arXiv:2604.05012.
 - jy-yuan(게시일 미상 · 2026-09-22 접근). *[ICML 2024] KIVI: A Tuning-Free Asymmetric 2bit ...*. github.com, https://github.com/jy-yuan/KIVI
-- arxiv.org(게시일 미상 · 2026-09-22 접근). *KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache*. arxiv.org, https://arxiv.org/html/2402.02750v2
-- arxiv.org(게시일 미상 · 2026-09-22 접근). *InfiniGen: Efficient Generative Inference of Large ...*. arxiv.org, https://arxiv.org/abs/2406.19707
 - snu-comparch(게시일 미상 · 2026-09-22 접근). *GitHub - snu-comparch/InfiniGen: InfiniGen: Efficient Generative Inference of Large Language Models with Dynamic KV Cache Management (OSDI'24) · GitHub*. github.com, https://github.com/snu-comparch/InfiniGen
 - turbo-quant.com(게시일 미상 · 2026-09-22 접근). *TurboQuant vs KIVI: KV Cache Quantization Compared | TurboQuant Tools*. turbo-quant.com, https://turbo-quant.com/turboquant-vs-kivi
 - medium.com(게시일 미상 · 2026-09-22 접근). *TurboQuant Changes the Economics of Local AI Inference - Medium*. medium.com, https://medium.com/@michael.hannecke/googles-turboquant-changes-the-economics-of-local-ai-inference-acce5839014d
 - liner.com(게시일 미상 · 2026-09-22 접근). *KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache [Quick Review]*. liner.com, https://liner.com/review/kivi-tuningfree-asymmetric-2bit-quantization-for-kv-cache
-- arxiv.org(게시일 미상 · 2026-09-22 접근). *InfiniGen: Efficient Generative Inference of Large Language Models with Dynamic KV Cache Management*. arxiv.org, https://arxiv.org/html/2406.19707v1
-- arxiv.org(게시일 미상 · 2026-09-22 접근). *Comparative Characterization of KV Cache Management ...*. arxiv.org, https://arxiv.org/pdf/2604.05012
