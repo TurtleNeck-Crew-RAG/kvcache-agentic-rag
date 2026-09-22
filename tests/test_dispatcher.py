@@ -4,7 +4,7 @@ from pathlib import Path
 
 from langgraph.graph import END
 
-from graph.dispatcher import MAX_RETRY, dispatcher
+from graph.dispatcher import LLM_BUDGET, MAX_RETRY, dispatcher
 from graph.state import init_state
 
 
@@ -52,7 +52,7 @@ def test_rule3p_neutrality_loop_then_report():
 def test_budget_stops_retries_only():
     s = init_state({}, {})
     s["tech_summary"] = {"KIVI": {}}
-    s["llm_calls"] = 101
+    s["llm_calls"] = LLM_BUDGET + 1
     for k in ("market_eval", "stakeholder_eval", "domain_eval"):
         s[k] = {"KIVI": _eval(neg=0)}
     assert dispatcher(s)["next"] == ["synthesis"]
