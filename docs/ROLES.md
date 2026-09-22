@@ -2,7 +2,7 @@
 
 > 이 문서 하나 읽고 바로 개발 시작할 수 있게 썼습니다. 규칙 상세는 [CONTRIBUTING.md](../CONTRIBUTING.md), 설계 근거는 [설계서.md](설계서.md).
 >
-> **마감: DAY 3 16시** — GitHub 링크 + `RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf` (슬랙 스레드).
+> **마감: DAY 3 15시** — GitHub 링크 + `RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf` (슬랙 스레드).
 > 발표는 README 로만 10분 — 차별점 · 보고서 핵심 · Lessons Learned.
 
 ---

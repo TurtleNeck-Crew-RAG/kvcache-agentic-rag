@@ -10,6 +10,7 @@ dependencies = [
     "langchain>=1.0.2",
     "langchain-openai>=1.0.1",
     "langchain-community>=0.3.31",
+    "langchain-classic>=1.0.0",     # CacheBackedEmbeddings · LocalFileStore (langchain 1.x 에서 분리)
     # RAG 파이프라인 (설계서 3.4 · 3.6)
     "langchain-huggingface>=0.3.0",
     "sentence-transformers>=5.1.1",
