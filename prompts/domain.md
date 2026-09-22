@@ -14,4 +14,8 @@
 정확도 손실과 오버헤드는 통과 임계값으로 사용하지 말고 Recall·Latency
 축에 보고한다. 메모리 절감 또는 오프로딩 효과는 Memory 축에 보고한다.
 
+`rationale`, `positives`, `negatives`, `axes`의 모든 판단 문장에
+`[논문 p.N]`, `[웹 URL]`, `[추론]` 중 하나를 붙인다. `negatives`는 기술별로
+서로 다른 한계를 2건 이상 기록하고, 근거가 없는 판단은 만들지 않는다.
+
 결과는 요청된 structured output 형식만 반환한다.

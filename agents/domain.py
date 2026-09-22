@@ -11,11 +11,11 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 from langchain_tavily import TavilySearch
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from agents._common import TECHS, llm, load_prompt
 from graph.state import Evidence, GraphState, Ref, RetrievalEntry
@@ -28,6 +28,16 @@ FACT_QUESTIONS = (
     "정확도 손실 수치와 그 실험 조건은 무엇인가?",
     "전송, 프리패치 또는 추가 연산 오버헤드는 무엇인가?",
 )
+SOURCE_TAG = re.compile(r"\[(?:논문(?: p\.\d+)?|웹(?: [^\]]+)?|추론)\]")
+
+
+def _require_source_tag(value: str) -> str:
+    if value.strip() != "근거 없음" and not SOURCE_TAG.search(value):
+        raise ValueError("판단 문장에 출처 태그가 필요합니다")
+    return value
+
+
+TaggedText = Annotated[str, AfterValidator(_require_source_tag)]
 
 
 class EvidenceOutput(BaseModel):
@@ -42,9 +52,9 @@ class EvidenceOutput(BaseModel):
 class AxesOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    recall: str = Field(min_length=1)
-    latency: str = Field(min_length=1)
-    memory: str = Field(min_length=1)
+    recall: TaggedText
+    latency: TaggedText
+    memory: TaggedText
 
 
 class DomainEvaluationOutput(BaseModel):
@@ -53,9 +63,9 @@ class DomainEvaluationOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     verdict: Literal["적합", "조건부", "부적합"]
-    rationale: str = Field(min_length=1)
-    positives: list[str] = Field(min_length=1)
-    negatives: list[str] = Field(min_length=1)
+    rationale: TaggedText
+    positives: list[TaggedText] = Field(min_length=1)
+    negatives: list[TaggedText] = Field(min_length=2)
     axes: AxesOutput
     evidence: list[EvidenceOutput] = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)

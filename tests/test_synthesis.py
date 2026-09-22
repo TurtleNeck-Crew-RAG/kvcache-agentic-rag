@@ -5,6 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 import agents.synthesis as synthesis
+from graph.dispatcher import dispatcher
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -62,22 +63,40 @@ def _bundle() -> synthesis.SynthesisBundleOutput:
     )
 
 
+def _neutrality(result: str = "pass") -> synthesis.NeutralityOutput:
+    violations = [] if result == "pass" else ["시장 행의 `KIVI가 더 우수하다`는 우열 표현"]
+    return synthesis.NeutralityOutput(result=result, violations=violations)
+
+
 def test_run_builds_matrix_and_trl_from_all_evaluations(monkeypatch):
-    prompts: list[str] = []
+    synthesis_prompts: list[str] = []
+    judge_prompts: list[str] = []
 
     class FakeEvaluator:
         def invoke(self, prompt: str):
-            prompts.append(prompt)
+            synthesis_prompts.append(prompt)
             return _bundle()
 
-    fake_llm = Mock()
-    fake_llm.with_structured_output.return_value = FakeEvaluator()
-    monkeypatch.setattr(synthesis, "llm", lambda role: fake_llm)
+    class FakeJudge:
+        def invoke(self, prompt: str):
+            judge_prompts.append(prompt)
+            return _neutrality()
+
+    generator = Mock()
+    generator.with_structured_output.return_value = FakeEvaluator()
+    judge = Mock()
+    judge.with_structured_output.return_value = FakeJudge()
+    monkeypatch.setattr(
+        synthesis,
+        "llm",
+        lambda role: {"generator": generator, "judge": judge}[role],
+    )
 
     result = synthesis.run(_state())
 
-    assert set(result) == {"synthesis", "trl_estimate", "llm_calls"}
-    assert result["llm_calls"] == 1
+    assert set(result) == {"synthesis", "trl_estimate", "neutrality", "llm_calls"}
+    assert result["llm_calls"] == 2
+    assert result["neutrality"] == {"result": "pass", "violations": []}
     assert set(result["synthesis"]["matrix"]) == {
         "기술 성숙도",
         "시장",
@@ -88,9 +107,12 @@ def test_run_builds_matrix_and_trl_from_all_evaluations(monkeypatch):
     assert result["trl_estimate"]["KIVI"]["level"] == 4
     assert len(result["synthesis"]["conflicts"]) >= 1
 
-    assert len(prompts) == 1
+    assert len(synthesis_prompts) == 1
     for key in synthesis.REQUIRED_INPUTS:
-        assert f'"{key}"' in prompts[0]
+        assert f'"{key}"' in synthesis_prompts[0]
+    assert len(judge_prompts) == 1
+    assert '"synthesis"' in judge_prompts[0]
+    assert '"trl_estimate"' in judge_prompts[0]
 
 
 def test_run_validates_dict_structured_output(monkeypatch):
@@ -98,13 +120,66 @@ def test_run_validates_dict_structured_output(monkeypatch):
         def invoke(self, prompt: str):
             return _bundle().model_dump(by_alias=True)
 
-    fake_llm = Mock()
-    fake_llm.with_structured_output.return_value = FakeEvaluator()
-    monkeypatch.setattr(synthesis, "llm", lambda role: fake_llm)
+    class FakeJudge:
+        def invoke(self, prompt: str):
+            return _neutrality().model_dump()
+
+    generator = Mock()
+    generator.with_structured_output.return_value = FakeEvaluator()
+    judge = Mock()
+    judge.with_structured_output.return_value = FakeJudge()
+    monkeypatch.setattr(
+        synthesis,
+        "llm",
+        lambda role: {"generator": generator, "judge": judge}[role],
+    )
 
     result = synthesis.run(_state())
 
     assert result["synthesis"]["matrix"]["도메인"]["InfiniGen"]
+
+
+def test_neutrality_fail_rewrites_then_passes(monkeypatch):
+    prompts: list[str] = []
+    judge_results = iter((_neutrality("fail"), _neutrality()))
+
+    class FakeEvaluator:
+        def invoke(self, prompt: str):
+            prompts.append(prompt)
+            return _bundle()
+
+    class FakeJudge:
+        def invoke(self, prompt: str):
+            return next(judge_results)
+
+    generator = Mock()
+    generator.with_structured_output.return_value = FakeEvaluator()
+    judge = Mock()
+    judge.with_structured_output.return_value = FakeJudge()
+    monkeypatch.setattr(
+        synthesis,
+        "llm",
+        lambda role: {"generator": generator, "judge": judge}[role],
+    )
+
+    state = _state()
+    state.update(synthesis.run(state))
+    assert state["neutrality"]["result"] == "fail"
+
+    state.update(dispatcher(state))
+    assert state["next"] == ["synthesis"]
+    assert state["retry"] == {"synth": 1}
+
+    state.update(synthesis.run(state))
+    assert "## 재작성 요청" in prompts[1]
+    assert "KIVI가 더 우수하다" in prompts[1]
+    assert state["neutrality"]["result"] == "pass"
+    assert dispatcher(state)["next"] == ["report"]
+
+
+def test_neutrality_result_must_match_violations():
+    with pytest.raises(ValueError, match="pass는 빈 violations"):
+        synthesis.NeutralityOutput(result="pass", violations=["추천 표현"])
 
 
 @pytest.mark.parametrize("missing", synthesis.REQUIRED_INPUTS)
