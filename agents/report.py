@@ -16,6 +16,7 @@ from typing import Any
 from agents._common import llm, load_prompt
 from agents.report_render import (
     assemble,
+    is_failed,
     limitation_stats,
     metrics_from_eval,
     render_evaluation,
@@ -27,7 +28,8 @@ from graph.state import GraphState
 
 TITLE = "KV cache 최적화 기술 다관점 평가 — KIVI(SW) · InfiniGen(HW) · 스마트폰 온디바이스 LLM"
 OUT_DIR = Path("outputs/report")
-EVAL_PATH = Path("outputs/eval.json")                     # A 의 rag.evaluate 출력 (#27) → 6장 5번
+EVAL_PATHS = (Path("outputs/eval.json"),                  # A 의 rag.evaluate 출력 (#27) → 6장 5번
+              Path("experiments/sparse_compare/eval.json"))  # 리포에 커밋된 실측 사본 (outputs/ 는 git 제외)
 METRICS_PATH = Path("outputs/retrieval_metrics.json")     # 수동으로 넣을 때의 대체 경로 {"hit@4","mrr@4","ragas"}
 
 
@@ -48,8 +50,9 @@ def _split_prompt(text: str) -> tuple[str, dict[str, str]]:
 
 
 def _load_metrics() -> dict[str, Any] | None:
-    if EVAL_PATH.exists():
-        return metrics_from_eval(json.loads(EVAL_PATH.read_text(encoding="utf-8")))
+    for p in EVAL_PATHS:
+        if p.exists():
+            return metrics_from_eval(json.loads(p.read_text(encoding="utf-8")))
     if METRICS_PATH.exists():
         return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
     return None
@@ -84,8 +87,15 @@ def build_report(state: GraphState) -> tuple[str, int]:
     calls += 1
     ch["overview"] = _write_chapter(common, instr["overview"], _pick(state, "tech_summary"))
     calls += 1
-    ch["implications"] = _write_chapter(common, instr["implications"], _pick(state, "synthesis", "trl_estimate"))
-    calls += 1
+    if is_failed(state.get("synthesis")):     # 종합이 실패 기록이면 LLM 이 "실패" 를 엇갈림 주제로 쓴다 (실측 3회차) → 고정 문장
+        reason = next((c for c in (state["synthesis"].get("conflicts") or []) if "실패" in c), "종합 워커 실패")
+        ch["implications"] = (
+            "종합 워커가 실행되지 않아 관점 × 기술 매트릭스와 엇갈림 분석을 생성하지 못했다. "
+            f"사유: {reason}. 관점별 원자료는 4장에 그대로 있다. 시사점은 종합 워커 복구 후 다시 생성해야 한다."
+        )
+    else:
+        ch["implications"] = _write_chapter(common, instr["implications"], _pick(state, "synthesis", "trl_estimate"))
+        calls += 1
 
     # REFERENCE — 본문(1~6장)에 인용된 것만
     body = "\n".join(ch[k] for k in ("background", "selection", "overview", "evaluation", "implications", "limitations"))

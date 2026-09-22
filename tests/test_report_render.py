@@ -79,6 +79,25 @@ def test_selection_renders_criteria_and_excluded():
     assert "**L** — Q?" in md and "DeepSeek-V2 MLA (SW) — 재학습" in md and "15p" in md
 
 
+def test_limitation_stats_counts_evidence_dicts_and_inline_p_tags():
+    """워커 실출력 형식(실측 2026-09-22 3회차): 태그는 evidence[].tag 에, 수치 문장에는 [p.2] 만 붙는다."""
+    s = init_state({}, {})
+    s["tech_summary"] = {"KIVI": {"overview": "태그 없음", "mechanism": "", "numbers": ["2.6× 감소[p.2][p.1]"],
+                                  "limitations": [], "apply_conditions": [],
+                                  "evidence": [{"claim": "c1", "tag": "논문", "ref": "2402.02750", "page": 2},
+                                               {"claim": "c2", "tag": "추론", "ref": "", "page": None}]}}
+    s["synthesis"] = {"matrix": {}, "agreements": [], "conflicts": ["종합 워커 실패 — x [추론]"]}
+    st = limitation_stats(s)
+    assert st["tagged_total"] == 4            # [p.N] 문장 1 + evidence 2 + conflicts 1
+    assert st["inference_only"] == 2 and st["inference_ratio"] == 0.5
+
+
+def test_is_failed_detects_safe_fallback():
+    from agents.report_render import is_failed
+    assert is_failed({"conflicts": ["종합 워커 실패 — NotImplementedError [추론]"]})
+    assert not is_failed({"conflicts": ["KIVI 손실 해석 차이 [추론]"]}) and not is_failed(None)
+
+
 def test_limitation_stats_and_rendering():
     s = _full_state()
     s["retrieval_log"] = [

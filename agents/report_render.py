@@ -11,7 +11,8 @@ import re
 from typing import Any
 
 TECHS = ("KIVI", "InfiniGen")
-TAG_RE = re.compile(r"\[(논문|웹|추론)[^\]]*\]")
+TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d)[^\]]*\]")     # [논문 p.N] · [웹 URL] · [추론] · [p.N](논문)
+FAIL_MARK = "워커 실패"                                        # graph/safe.py fallback 이 남기는 표식
 
 CHAPTERS = (           # (key, 제목) — 이 순서가 목차다. SUMMARY 맨 앞 · REFERENCE 맨 뒤 고정
     ("summary", "SUMMARY"),
@@ -43,7 +44,7 @@ def is_cited(ref: dict[str, Any], body: str) -> bool:
         return True
     if ref["title"] and ref["title"] in body:
         return True
-    if ref["type"] == "논문" and "[논문" in body:
+    if ref["type"] == "논문" and ("[논문" in body or re.search(r"\[p\.\d", body)):
         return True
     return False
 
@@ -148,15 +149,27 @@ def render_evaluation(state: dict[str, Any]) -> str:
 
 # ---------- 6. 한계점 — 수치 계산 ----------
 
-def _tagged_statements(state: dict[str, Any]) -> list[str]:
-    """출처 태그가 붙은 판단 문장을 전부 모은다 (evals · tech_summary · synthesis)."""
-    found: list[str] = []
+def _tag_kind(t: str) -> str:
+    return "논문" if t.startswith("p.") else t
+
+
+def _tagged_statements(state: dict[str, Any]) -> list[tuple[str, set[str]]]:
+    """출처 태그가 붙은 판단 문장을 (문장, {태그 종류}) 로 모은다.
+
+    두 형식을 다 센다 — 문장 안 인라인 태그(`[논문 p.7]` · `[p.2]` · `[추론]`)와
+    `Evidence` dict(`{"claim", "tag", ...}` — 워커 실출력은 태그를 여기에 둔다).
+    """
+    found: list[tuple[str, set[str]]] = []
 
     def walk(x: Any) -> None:
         if isinstance(x, str):
-            if TAG_RE.search(x):
-                found.append(x)
+            tags = {_tag_kind(t) for t in TAG_RE.findall(x)}
+            if tags:
+                found.append((x, tags))
         elif isinstance(x, dict):
+            if "claim" in x and "tag" in x:               # Evidence dict
+                found.append((str(x.get("claim", "")), {str(x["tag"])}))
+                return
             for v in x.values():
                 walk(v)
         elif isinstance(x, list):
@@ -168,9 +181,20 @@ def _tagged_statements(state: dict[str, Any]) -> list[str]:
     return found
 
 
+def is_failed(value: Any) -> bool:
+    """graph/safe.py 의 fallback 인가 (rationale · conflicts · basis 에 FAIL_MARK)."""
+    return FAIL_MARK in json_dumps(value)
+
+
+def json_dumps(value: Any) -> str:
+    import json
+    return json.dumps(value, ensure_ascii=False) if value is not None else ""
+
+
 def limitation_stats(state: dict[str, Any]) -> dict[str, Any]:
-    stmts = _tagged_statements(state)
-    inference_only = [s for s in stmts if TAG_RE.findall(s) and all(t == "추론" for t in TAG_RE.findall(s))]
+    tagged = _tagged_statements(state)
+    stmts = [s for s, _ in tagged]
+    inference_only = [s for s, tags in tagged if tags == {"추론"}]
     log = state.get("retrieval_log") or []
     rewritten = [r for r in log if r.get("rewritten")]
     return {
