@@ -34,4 +34,4 @@ jobs:
 
       - name: 단위 테스트 (LLM · 모델 다운로드 없이 도는 것만)
         # 전체 의존성(torch 등)은 무거워서 CI 에선 langgraph + pytest 만 설치
-        run: uvx --with langgraph --with pytest pytest -q tests
+        run: uvx --with langgraph --with langchain-openai --with pytest pytest -q tests

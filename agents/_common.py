@@ -1,8 +1,8 @@
 """워커 공용 유틸 — 프롬프트 로딩 · LLM 인스턴스 · 기술 목록.  [공용 — 바꾸기 전에 슬랙]
 
-from agents._common import TECHS, load_prompt, llm
+from agents._common import TECHS, llm, load_prompt, render_prompt
 
-    prompt = load_prompt("market")                 # prompts/market.md
+    prompt = render_prompt("market", tech=tech)    # prompts/market.md 의 {tech} 치환
     rubric = load_prompt("rubrics/4.2-market")     # prompts/rubrics/4.2-market.md
     out = llm("generator").invoke(...)             # gpt-4.1-mini
     out = llm("judge").invoke(...)                 # gpt-4.1-mini, temperature 0, 별도 인스턴스
@@ -29,6 +29,14 @@ MODELS = {
 def load_prompt(name: str) -> str:
     """prompts/<name>.md 를 읽는다. 코드에 긴 프롬프트 문자열을 두지 않기 위함."""
     return (PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
+
+
+def render_prompt(name: str, **values: object) -> str:
+    """load_prompt + `{key}` 치환. str.format 과 달리 프롬프트 안의 다른 중괄호(JSON 예시 등)를 건드리지 않는다."""
+    text = load_prompt(name)
+    for key, val in values.items():
+        text = text.replace("{" + key + "}", str(val))
+    return text
 
 
 @lru_cache
