@@ -25,7 +25,7 @@ def app_module(monkeypatch, tmp_path):
 
 
 def test_dump_writes_run_json_and_filled_keys_only(app_module, tmp_path):
-    state = {"llm_calls": 7, "retry": {"stake": 1}, "citations": [{"title": "x"}], "synthesis": None}
+    state = {"llm_calls": 7, "retry": {"stake": 1}, "citations": [{"title": "x"}], "synthesis": None, "market_eval": {}}
     app_module._dump(state, ["start", "tech_research", "market"], "RuntimeError: boom", 3.14)
     run = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
     assert run["ok"] is False and "boom" in run["error"]
@@ -34,3 +34,4 @@ def test_dump_writes_run_json_and_filled_keys_only(app_module, tmp_path):
     assert run["keys_filled"] == ["citations"]
     assert (tmp_path / "citations.json").exists()
     assert not (tmp_path / "synthesis.json").exists()          # None 인 키는 파일을 만들지 않는다
+    assert not (tmp_path / "market_eval.json").exists()        # init_state 의 빈 {} 도 만들지 않는다 (실측 2026-09-22 — 2바이트 파일 5개)
