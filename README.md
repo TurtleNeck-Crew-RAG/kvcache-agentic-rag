@@ -29,11 +29,13 @@
 ## Tech Stack
 - Framework : LangGraph 1.x (Python 3.11, uv)
 - LLM/Generator : gpt-4.1-mini
-- LLM/Judge : gpt-4.1-mini (temperature 0, Generator 와 별도 인스턴스). 설계서 3.6 의 "판단 없는 변환 = nano" 는 **미사용** — 유일한 변환 단계인 영어 번역 질의가 검색 성패를 가르므로(nano 0.75 / mini 0.80) mini 로 상향 (#27)
-- Retrieval : Chroma(dense) + BM25(sparse, 영어 번역 질의) RRF 0.5/0.5, k=4 — **Hit Rate@4 0.80, MRR@4 0.52** (20문항; dense 단독 0.55/0.40, 설계 초기값 M3-sparse 하이브리드 0.45 → 실측으로 BM25 확정: [experiments/sparse_compare](experiments/sparse_compare/README.md)). **Reranker 없음** — k=4 에서 Hit@4 0.80 을 달성해 재정렬 없이 충분하다고 판단, 대신 Generator 등급을 nano 가 아닌 mini 로 둬 컨텍스트 활용력을 확보 (설계서 3.4)
-- Embedding : `BAAI/bge-m3` (오픈소스, 로컬) — 후보 4개 대조군 실측, 한국어 질의·max_seq 8192 요건으로 선정 (설계서 3.5)
-- Generation eval : RAGAS **Faithfulness 0.936 · ResponseRelevancy 0.838 · LLMContextPrecisionWithoutReference 0.912** (20문항, 근거 없음 0)
-- Observability : LangSmith 프로젝트 `kv-cache-eval`
+- LLM/Judge : gpt-4.1-mini (temperature 0, Generator 와 별도 인스턴스) — 관련성 · Faithfulness · 중립성 · 질문 재작성 · 영어 번역 질의
+- Retrieval : Chroma(dense) + BM25(sparse) 이중 질의 하이브리드, RRF 0.5/0.5, k=4, Reranker 없음 — **Hit Rate@4 0.80 · MRR@4 0.52** (20문항, dense 단독 0.55/0.40 → [실측](experiments/sparse_compare/README.md))
+- Embedding : `BAAI/bge-m3` (오픈소스, 로컬) — 후보 4개 대조군을 우리 코퍼스·한국어 질의로 실측해 선정 ([실측](experiments/embed_compare/README.md), 설계서 3.5)
+- Generation eval : RAGAS **Faithfulness 0.936 · ResponseRelevancy 0.838 · ContextPrecision 0.912** (20문항)
+- Web search : Tavily (시장 · 이해관계자 · HW 반례) · Observability : LangSmith `kv-cache-eval`
+
+> 설계서 3.6 의 nano(판단 없는 변환)는 미사용 — 유일한 변환 단계인 번역 질의가 검색 성패를 가르므로(nano 0.75 / mini 0.80) mini 로. Reranker 는 k=4 에서 목표 Hit@4 를 달성해 두지 않음 (설계서 3.4)
 
 ## Agents
 
