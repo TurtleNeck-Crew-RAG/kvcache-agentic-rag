@@ -25,6 +25,9 @@ jobs:
           if [ -n "$bad" ]; then echo "::error::커밋하면 안 되는 파일: $bad"; exit 1; fi
 
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true            # torch 등 무거운 의존성은 캐시 — 첫 실행만 몇 분
+          cache-dependency-glob: "pyproject.toml"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -32,6 +35,10 @@ jobs:
       - name: 문법 · import 순서 (ruff)
         run: uvx ruff check .
 
+      - name: 의존성 설치 (pyproject 기준 — 워커가 무엇을 import 하든 테스트가 돈다)
+        # 전에는 langgraph + langchain-openai 만 설치했는데, 워커가 rag.* 를 끌어오면서
+        # tests/test_domain.py 가 langchain_chroma 를 못 찾아 main 이 #25 부터 빨갔다 (2026-09-22)
+        run: uv sync --group dev
+
       - name: 단위 테스트 (LLM · 모델 다운로드 없이 도는 것만)
-        # 전체 의존성(torch 등)은 무거워서 CI 에선 langgraph + pytest 만 설치
-        run: uvx --with langgraph --with langchain-openai --with pytest pytest -q tests
+        run: uv run pytest -q tests
