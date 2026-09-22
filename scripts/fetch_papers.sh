@@ -15,7 +15,7 @@ fetch 2402.02750 kivi        # KIVI (ICML 2024)  15p
 fetch 2406.19707 infinigen   # InfiniGen (OSDI 2024) 18p
 
 python - <<'PY'
-import fitz, pathlib
+import pathlib, pymupdf
 for p in sorted(pathlib.Path("data/papers").glob("*.pdf")):
-    print(f"{p.name}: {fitz.open(p).page_count}p")
+    print(f"{p.name}: {pymupdf.open(p).page_count}p")
 PY
