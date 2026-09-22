@@ -16,6 +16,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
 
@@ -53,11 +55,16 @@ class RagAnswer(BaseModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
 
 
+_BAD_TAG = re.compile(r"\[p\.(?!\d+\])[^\]]*\]")   # [p.4.1] 같은 절 번호 태그 — 페이지가 아니므로 제거
+
+
 def _generate(tech: str, question: str, docs: list[Document]) -> RagAnswer:
-    prompt = render_prompt("rag_generator", 
-        tech=tech, question=question, context=format_context(docs)
-    )
-    return llm("generator").with_structured_output(RagAnswer).invoke(prompt)
+    prompt = render_prompt("rag_generator", tech=tech, question=question, context=format_context(docs))
+    gen = llm("generator").with_structured_output(RagAnswer).invoke(prompt)
+    gen.answer = _BAD_TAG.sub("", gen.answer)
+    pages = {d.metadata["page"] for d in docs}
+    gen.evidence = [e for e in gen.evidence if e.page in pages]   # 컨텍스트에 없는 페이지 인용 제거
+    return gen
 
 
 def ask(tech: str, question: str, node: str, *, sparse: SparseKind | None = "m3", k: int = 4) -> dict:
