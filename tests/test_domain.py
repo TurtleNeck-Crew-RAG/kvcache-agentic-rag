@@ -50,13 +50,16 @@ def _evaluation(tech: str) -> domain.DomainEvaluationOutput:
         )
     return domain.DomainEvaluationOutput(
         verdict="조건부",
-        rationale="배포 제약의 일부 조건을 추가로 확인해야 한다.",
-        positives=["재학습 없이 적용할 수 있다."],
-        negatives=["대상 기기의 대역폭에서는 검증되지 않았다."],
+        rationale="배포 제약의 일부 조건을 추가로 확인해야 한다 [추론].",
+        positives=["재학습 없이 적용할 수 있다 [논문 p.1]."],
+        negatives=[
+            "대상 기기의 대역폭에서는 검증되지 않았다 [논문 p.1].",
+            "모바일 소비 전력은 확인되지 않았다 [추론].",
+        ],
         axes={
-            "recall": "정확도 결과를 임계값 없이 보고한다.",
-            "latency": "추가 오버헤드를 보고한다.",
-            "memory": "KV cache 메모리 절감 효과를 보고한다.",
+            "recall": "정확도 결과를 임계값 없이 보고한다 [논문 p.1].",
+            "latency": "추가 오버헤드를 보고한다 [논문 p.1].",
+            "memory": "KV cache 메모리 절감 효과를 보고한다 [논문 p.1].",
         },
         evidence=evidence,
         confidence=0.7,
@@ -168,3 +171,23 @@ def test_run_validates_dict_structured_output(monkeypatch):
 def test_run_rejects_missing_domain_config():
     with pytest.raises(ValueError, match="state\\['domain'\\]"):
         domain.run({})
+
+
+def test_fact_questions_do_not_prime_domain_verdict():
+    assert all(
+        forbidden not in question
+        for question in domain.FACT_QUESTIONS
+        for forbidden in ("온디바이스", "적합")
+    )
+
+
+def test_domain_output_requires_two_tagged_negatives():
+    data = _evaluation("KIVI").model_dump()
+    data["negatives"] = data["negatives"][:1]
+    with pytest.raises(ValueError, match="at least 2"):
+        domain.DomainEvaluationOutput.model_validate(data)
+
+    data = _evaluation("KIVI").model_dump()
+    data["negatives"][0] = "출처가 없는 한계"
+    with pytest.raises(ValueError, match="출처 태그"):
+        domain.DomainEvaluationOutput.model_validate(data)
