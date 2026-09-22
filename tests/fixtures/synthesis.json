@@ -1,0 +1,44 @@
+{
+  "_note": "synthesis · trl_estimate · neutrality · citations 예시 — D report 렌더링 · C synthesis 출력 형식 확인용. 내용은 placeholder, 형식은 graph/state.py 의 Synthesis · TRL · Neutrality · Ref",
+  "synthesis": {
+    "matrix": {
+      "기술 성숙도": {
+        "KIVI": "TRL 4 — 공개 코드 + 후속 연구가 베이스라인으로 재현 [웹 URL]",
+        "InfiniGen": "TRL 3~4 — OSDI 게재, 공개 구현은 있으나 저자 외 재현 미확인 [웹 URL] [추론]"
+      },
+      "시장": {
+        "KIVI": "중 — 서빙 프레임워크 공식 통합 없음, 오픈소스 구현 존재 [웹 URL]",
+        "InfiniGen": "하 — 학술 구현 단계, 제품 적용 사례 없음 [추론]"
+      },
+      "이해관계자": {
+        "KIVI": "찬반 혼재 — 개발자는 무보정 적용을 환영, 경쟁 진영(MLA)은 사후 압축을 근본 해결로 보지 않음 [웹 URL]",
+        "InfiniGen": "찬반 혼재 — 정확도 무손실 지지, LLM in a flash 와 차별점 불명확 [웹 URL]"
+      },
+      "도메인": {
+        "KIVI": "조건부 — 재학습 불필요 [논문 p.1], MQA 소형 모델 2bit 손실 [논문 p.7]",
+        "InfiniGen": "조건부 — 전용 HW 불필요 [논문 p.1], 폰 플래시 대역폭에서 프리패치 지연 미검증 [논문 p.9] [추론]"
+      }
+    },
+    "agreements": [
+      "두 기술 모두 배포된 모델에 재학습 없이 적용 가능하다는 점에서 온디바이스 배포 제약을 통과한다 [논문 p.1]"
+    ],
+    "conflicts": [
+      "KIVI 의 2% 정확도 손실을 시장 관점은 메모리 2.6× 절감 대비 수용 가능으로, 도메인 관점은 어시스턴트 응답 품질 기준으로 다르게 읽는다 [논문 p.7] [추론]",
+      "InfiniGen 의 무손실을 이해관계자(시스템 연구자)는 강점으로, 도메인 관점은 전송 지연·전력이 폰에서 검증되지 않아 조건부로 본다 [논문 p.9] [추론]"
+    ]
+  },
+  "trl_estimate": {
+    "KIVI": {"level": 4, "basis": ["공개 코드 [웹 https://github.com/jy-yuan/KIVI]", "후속 양자화 연구가 베이스라인으로 사용 [웹 URL]"], "reference_date": "2024-02 (arXiv v1) / 2024-07 (ICML)"},
+    "InfiniGen": {"level": 3, "basis": ["OSDI 2024 게재 [논문 p.1]", "저자 외 재현·프레임워크 통합 미확인 [추론]"], "reference_date": "2024-06 (arXiv v1) / 2024-07 (OSDI)"}
+  },
+  "neutrality": {
+    "result": "pass",
+    "violations": []
+  },
+  "citations": [
+    {"type": "논문", "authors": "Liu, Z., Yuan, J., Jin, H. et al.", "year": "2024", "title": "KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache", "venue": "Proceedings of the 41st International Conference on Machine Learning (ICML), PMLR 235", "id_or_url": "arXiv:2402.02750", "accessed": "2026-09-22"},
+    {"type": "논문", "authors": "Lee, W., Lee, J., Seo, J., Sim, J.", "year": "2024", "title": "InfiniGen: Efficient Generative Inference of Large Language Models with Dynamic KV Cache Management", "venue": "18th USENIX Symposium on Operating Systems Design and Implementation (OSDI)", "id_or_url": "arXiv:2406.19707", "accessed": "2026-09-22"},
+    {"type": "웹", "authors": "jy-yuan", "year": "2024", "title": "KIVI GitHub repository", "venue": "GitHub", "id_or_url": "https://github.com/jy-yuan/KIVI", "accessed": "2026-09-22"},
+    {"type": "웹", "authors": "미인용 예시", "year": "2026", "title": "본문에 인용되지 않은 항목 — REFERENCE 렌더러가 제외해야 함", "venue": "테스트", "id_or_url": "https://example.invalid/unused", "accessed": "2026-09-22"}
+  ]
+}

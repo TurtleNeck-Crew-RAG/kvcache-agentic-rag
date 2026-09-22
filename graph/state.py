@@ -1,5 +1,7 @@
 """State 스키마 — 설계서 5.2 표를 그대로 옮김.  [소유: D 황재원]
 
+✅ 확정 2026-09-22 (#4). 이후 키 추가·이름 변경은 D 에게 이슈 — 전 워커가 의존한다.
+
 원칙
 - fan-out 3개(market / stakeholder / domain)는 분리 키 → 동시 갱신 충돌 없음
 - 누적(reducer)은 citations · retrieval_log · llm_calls · retry 만

@@ -6,6 +6,7 @@
 |---|---|---|
 | `tech_summary.json` | `state["tech_summary"]` 예시 (KIVI · InfiniGen) | B market/stakeholder · C domain 입력 |
 | `evals.json` | `market_eval` · `stakeholder_eval` · `domain_eval` 예시 | C synthesis · D report 입력 |
+| `synthesis.json` | `synthesis` · `trl_estimate` · `neutrality` · `citations` 예시 (미인용 citation 1건 포함 — REFERENCE 제외 테스트용) | D report 입력 · C synthesis 출력 형식 대조 |
 
 ```python
 import json

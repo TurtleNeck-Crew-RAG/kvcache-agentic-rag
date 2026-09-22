@@ -1,4 +1,7 @@
 """Dispatcher 규칙표 단위 테스트 — LLM·네트워크 불필요. (설계서 5.3)"""
+import json
+from pathlib import Path
+
 from langgraph.graph import END
 
 from graph.dispatcher import MAX_RETRY, dispatcher
@@ -53,3 +56,43 @@ def test_budget_stops_retries_only():
     for k in ("market_eval", "stakeholder_eval", "domain_eval"):
         s[k] = {"KIVI": _eval(neg=0)}
     assert dispatcher(s)["next"] == ["synthesis"]
+
+
+# ---- fixtures 기반 — 실제 워커 출력 형식(tests/fixtures/*.json)으로 규칙표를 검증 ----
+FIX = Path(__file__).parent / "fixtures"
+
+
+def _load(name: str) -> dict:
+    d = json.loads((FIX / name).read_text(encoding="utf-8"))
+    d.pop("_note", None)
+    return d
+
+
+def _state_after_evals():
+    s = init_state({}, {})
+    s["tech_summary"] = _load("tech_summary.json")
+    s.update(_load("evals.json"))
+    return s
+
+
+def test_fixtures_match_state_keys():
+    s = _state_after_evals()
+    for k in ("market_eval", "stakeholder_eval", "domain_eval"):
+        assert set(s[k]) == {"KIVI", "InfiniGen"}, k
+    for e in s["stakeholder_eval"].values():
+        assert len(e["negatives"]) >= 2          # 규칙 2' 통과 조건
+
+
+def test_fixtures_flow_to_synthesis_then_report():
+    s = _state_after_evals()
+    assert dispatcher(s)["next"] == ["synthesis"]           # 3
+    s.update(_load("synthesis.json"))                       # C 출력 형식
+    assert s["neutrality"]["result"] == "pass"
+    assert dispatcher(s)["next"] == ["report"]              # 4
+    s["report_md"] = "# report"
+    assert dispatcher(s)["next"] == [END]
+
+
+def test_synthesis_fixture_has_unused_citation_for_reference_filter():
+    d = _load("synthesis.json")
+    assert any("미인용" in c["authors"] for c in d["citations"])
