@@ -1,4 +1,4 @@
-"""이해관계자 재검색의 근거 보존·중복·종료 검증. [소유: B 심준용]"""
+"""이해관계자 재검색의 근거 보존·중복·종료 검증."""
 import copy
 import json
 from types import SimpleNamespace

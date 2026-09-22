@@ -90,7 +90,7 @@ def main():
     docs_norm = [norm(c["text"]) for c in chunks]
     for item in eval_set:
         if not any(norm(item["gold"]) in d for d in docs_norm):
-            print(f"⚠️ gold 미존재: {item['gold'][:60]}")
+            print(f"경고: gold 미존재: {item['gold'][:60]}")
 
     rows = []
     for m in a.models:

@@ -1,4 +1,4 @@
-"""BGE-M3 임베딩 — dense + sparse 를 한 모델에서 (설계서 3.4 · 3.5).  [소유: A 박유진]
+"""BGE-M3 임베딩 — dense + sparse 를 한 모델에서 (설계서 3.4 · 3.5).
 
 FlagEmbedding 의 BGEM3FlagModel 을 LangChain Embeddings 인터페이스로 감싼다.
 - dense  : embed_documents / embed_query  → Chroma (CacheBackedEmbeddings 로 캐시)

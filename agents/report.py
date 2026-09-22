@@ -1,4 +1,4 @@
-"""보고서 생성 에이전트 — 설계서 6장 목차 (SUMMARY ½p → 1~6장 → REFERENCE).  [소유: D 황재원]
+"""보고서 생성 에이전트 — 설계서 6장 목차 (SUMMARY ½p → 1~6장 → REFERENCE).
 
 출력 키: report_md · llm_calls (+ outputs/report/report.md → PDF)
 

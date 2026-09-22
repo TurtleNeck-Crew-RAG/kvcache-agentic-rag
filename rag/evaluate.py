@@ -1,4 +1,4 @@
-"""검색·생성 평가 — 설계서 3.4 평가 행 · 3.5 해석 4·5 · 6장 한계점 5·6.  [소유: A 박유진]
+"""검색·생성 평가 — 설계서 3.4 평가 행 · 3.5 해석 4·5 · 6장 한계점 5·6.
 
 검색  Hit Rate@4 · MRR@4 — experiments/embed_compare/eval_set.json 20문항(논문당 10, ko/en 쌍)
       단일 질의 모드: dense / sparse-m3 / sparse-bm25 / hybrid-m3 / hybrid-bm25  (ko · en 각각)
@@ -52,7 +52,7 @@ def _gold_chunks(qs: list[dict]) -> dict[int, set[str]]:
         g = _norm(q["gold"])
         out[i] = {r["chunk_id"] for r in rows if r["tech"] == q["tech"] and g in _norm(r["text"])}
         if not out[i]:
-            print(f"  ⚠ gold 미발견 (문항 {i}): {q['gold']!r}", file=sys.stderr)
+            print(f"  경고: gold 미발견 (문항 {i}): {q['gold']!r}", file=sys.stderr)
     return out
 
 

@@ -1,4 +1,4 @@
-"""실행 스크립트 — python app.py  [소유: D 황재원]
+"""실행 스크립트 — python app.py
 
 1. config/domain.yaml · config/selection.yaml 로드 → init_state
 2. 인덱스(data/index/)가 없으면 rag.indexing.build_index()  (--skip-index 로 건너뜀)
@@ -49,7 +49,7 @@ def _dump(state: dict, visited: list[str], error: str | None, elapsed: float) ->
 def _ensure_index(skip: bool) -> None:
     if skip or (INDEX_DIR.exists() and any(INDEX_DIR.iterdir())):
         return
-    from rag.indexing import build_index  # A 소유 — 여기서만 import (없어도 그래프 조립은 되게)
+    from rag.indexing import build_index  # 여기서만 import (없어도 그래프 조립은 되게)
     print("index: data/index/ 없음 → build_index()")
     build_index()
 

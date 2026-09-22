@@ -1,4 +1,4 @@
-"""시장 평가 에이전트 (웹) — 설계서 2장, 4.2 Rubric (Tavily 만, RAG 없음, 기술별 독립 호출).  [소유: B 심준용]
+"""시장 평가 에이전트 (웹) — 설계서 2장, 4.2 Rubric (Tavily 만, RAG 없음, 기술별 독립 호출).
 
 출력 키: market_eval · citations · llm_calls
 """

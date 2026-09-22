@@ -1,4 +1,4 @@
-"""시장 워커의 격리, 출처, 실패 처리 계약. [소유: B 심준용]"""
+"""시장 워커의 격리, 출처, 실패 처리 계약."""
 import copy
 import json
 from types import SimpleNamespace

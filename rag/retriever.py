@@ -1,4 +1,4 @@
-"""런타임 검색 — 그림 1(b).  [소유: A 박유진]
+"""런타임 검색 — 그림 1(b).
 
 hybrid_search(tech, dense_query, sparse_query) — dense + sparse RRF 0.5/0.5, k=4, `tech` 필터 (설계서 3.4).
 **이중 질의**: dense 는 한국어 원 질의, sparse(BM25) 는 영어 번역 질의. 실측(#11, 20문항) 근거:

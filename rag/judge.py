@@ -1,4 +1,4 @@
-"""Judge — 그림 1(b)·(c).  [소유: A 박유진]
+"""Judge — 그림 1(b)·(c).
 
 Judge 1  관련성 structured yes/no → no 면 질문 재작성 1회 → 재실패 시 "논문에 근거 없음"
 Judge 2  Faithfulness — 생성이 컨텍스트에 근거하는지

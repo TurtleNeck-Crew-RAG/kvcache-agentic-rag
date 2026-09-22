@@ -11,7 +11,7 @@
 그래서 아래 두 가지가 다른 어떤 규칙보다 중요합니다.
 
 1. **State 키 이름·타입은 `graph/state.py` 가 유일한 정본** — 워커가 임의로 키를 추가하지 않는다. 필요하면 D 에게 이슈
-2. **자기 디렉토리만 고친다** — 각 파일 첫 줄 docstring 의 `[소유: X]` 확인. 남의 파트는 이슈로 넘긴다
+2. **자기 디렉토리만 고친다** — 담당 디렉토리 표를 확인한다. 남의 파트는 이슈로 넘긴다
 
 워커 인터페이스는 전부 `run(state) -> dict` 이고 **자기 출력 키만** 반환합니다 (설계서 5.2).
 그래서 워커끼리는 파일이 겹칠 일이 없고, 충돌이 난다면 거의 `state.py` · `pyproject.toml` · `README.md` 입니다.
@@ -142,10 +142,10 @@ git commit -m "docs: README Tech Stack 에 Hit Rate/MRR 기재"
 
 | gitmoji | type | | gitmoji | type |
 | --- | --- | --- | --- | --- |
-| ✨ | feat | | ♻️ | refactor |
-| 🐛 | fix | | ✅ | test |
-| 📝 | docs | | 🔧 | chore |
-| 🧪 | exp | | | |
+| | feat | | | refactor |
+| | fix | | | test |
+| | docs | | | chore |
+| | exp | | | |
 
 > 딱 하나만 맞춰주세요: **`<type>:` 은 반드시 있어야 합니다.**
 
@@ -171,14 +171,14 @@ PR 을 올리면 `검사` 가 자동으로 돕니다.
 
 | 검사 | 실패하면 |
 | --- | --- |
-| API 키 하드코딩 (`sk-`, `tvly-`, `lsv2_`) | ❌ 실패 — `.env` 로 옮기기 |
-| 커밋 금지 파일 (`.env`, `data/papers/*.pdf`, `data/index/`, `reference/`) | ❌ 실패 |
-| `ruff check` (문법 · import 순서) | ❌ 실패 — `uv run ruff check --fix .` |
-| `pytest tests/` (LLM 없이 도는 것만) | ❌ 실패 |
+| API 키 하드코딩 (`sk-`, `tvly-`, `lsv2_`) | 실패 — `.env` 로 옮기기 |
+| 커밋 금지 파일 (`.env`, `data/papers/*.pdf`, `data/index/`, `reference/`) | 실패 |
+| `ruff check` (문법 · import 순서) | 실패 — `uv run ruff check --fix .` |
+| `pytest tests/` (LLM 없이 도는 것만) | 실패 |
 
 ---
 
-## 6. 🚨 하지 말아야 할 것
+## 6. 하지 말아야 할 것
 
 | 대상 | 이유 |
 | --- | --- |
@@ -188,9 +188,9 @@ PR 을 올리면 `검사` 가 자동으로 돕니다.
 | **풀 밖 문서를 `data/papers/` 에 넣고 인덱싱** | 과제 명세 위반. 반례·시장 자료는 웹검색으로 |
 | **`[추론]` 태그 없이 판단 문장 쓰기** | 태그 비율이 보고서 한계점 수치입니다 |
 | **API 키 코드 직접 입력** | `.env` + `load_dotenv`. CI 가 막습니다 |
-| **`main` 직접 push** | 아래 ⚠️ 참조 |
+| **`main` 직접 push** | 아래 주의사항 참조 |
 
-> ⚠️ **`main` 보호는 GitHub 이 강제하지 못할 수 있습니다.** 무료 플랜의 private 저장소에는
+> **주의: `main` 보호는 GitHub 이 강제하지 못할 수 있습니다.** 무료 플랜의 private 저장소에는
 > branch protection·ruleset 을 걸 수 없습니다 (public 전환 시 가능).
 > 서로 지키는 것으로 합니다.
 
@@ -224,7 +224,7 @@ git fetch origin && git rebase origin/main    # 내 브랜치를 최신 main 위
 `.github/ISSUE_TEMPLATE/*.yml` 은 GitHub 의 **Issue Forms** 형식입니다.
 
 ```yaml
-name: "✨ Feature"          # 이슈 만들기 화면의 카드 제목
+name: "Feature"             # 이슈 만들기 화면의 카드 제목
 description: "새 기능 추가"   # 카드 부제
 title: "[FEAT] "           # 이슈 제목 기본값
 labels: ["feature"]        # 자동으로 붙는 라벨

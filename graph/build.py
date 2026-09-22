@@ -1,4 +1,4 @@
-"""Graph 조립 — Branching(fan-out/fan-in) + Loop (설계서 5.3).  [소유: D 황재원]
+"""Graph 조립 — Branching(fan-out/fan-in) + Loop (설계서 5.3).
 
 인덱싱 → 1 기술 조사 → 2 평가 3개 병렬 → 3 종합(+중립성 Judge) → 4 보고서
 모든 워커는 END 로 직행하지 않고 dispatcher 로 되돌아온다.

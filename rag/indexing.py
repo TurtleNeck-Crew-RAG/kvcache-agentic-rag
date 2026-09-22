@@ -1,4 +1,4 @@
-"""전처리 — 그림 1(a).  [소유: A 박유진]
+"""전처리 — 그림 1(a).
 
 PyMuPDFLoader (page 메타데이터 → [p.N] 인용)
 → RecursiveCharacterTextSplitter chunk 600 / overlap 100, metadata: chunk_id · tech · page

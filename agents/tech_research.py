@@ -1,4 +1,4 @@
-"""기술 조사 에이전트 (RAG) — 설계서 2장, 5.4.  [소유: A 박유진]
+"""기술 조사 에이전트 (RAG) — 설계서 2장, 5.4.
 
 고정 질문 5(개요·메커니즘·수치·한계·적용조건) × 기술 2 → rag_node.ask() 기술별 독립 호출.
 출력 키: tech_summary · citations · retrieval_log · llm_calls
