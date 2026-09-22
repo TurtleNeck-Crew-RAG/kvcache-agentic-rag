@@ -189,5 +189,5 @@ def test_domain_output_requires_two_tagged_negatives():
 
     data = _evaluation("KIVI").model_dump()
     data["negatives"][0] = "출처가 없는 한계"
-    with pytest.raises(ValueError, match="출처 태그"):
-        domain.DomainEvaluationOutput.model_validate(data)
+    out = domain.DomainEvaluationOutput.model_validate(data)        # 무태그 문장은 버리지 않고 [추론] 으로 기록 (#40 후속)
+    assert out.negatives[0] == "출처가 없는 한계 [추론]"
