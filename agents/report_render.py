@@ -1,0 +1,224 @@
+"""보고서 렌더러 — LLM 없이 State 만으로 만드는 장(章)들.  [소유: D 황재원]
+
+설계서 6장. LLM 을 쓰지 않는 부분을 여기 모아 테스트 가능하게 둔다:
+  2 기술 선정(selection.yaml) · 4 관점별 평가(*_eval) · 6 한계점(수치 계산) · REFERENCE(인용된 citations 만)
+LLM 이 쓰는 장(SUMMARY · 1 · 3 · 5)은 agents/report.py.
+이 모듈은 langchain 을 import 하지 않는다 — tests 가 CI(langgraph + pytest 만)에서 돌아야 한다.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+TECHS = ("KIVI", "InfiniGen")
+TAG_RE = re.compile(r"\[(논문|웹|추론)[^\]]*\]")
+
+CHAPTERS = (           # (key, 제목) — 이 순서가 목차다. SUMMARY 맨 앞 · REFERENCE 맨 뒤 고정
+    ("summary", "SUMMARY"),
+    ("background", "1. 분석 배경"),
+    ("selection", "2. 기술 선정"),
+    ("overview", "3. 기술 개요"),
+    ("evaluation", "4. 관점별 평가"),
+    ("implications", "5. 시사점"),
+    ("limitations", "6. 한계점"),
+    ("reference", "REFERENCE"),
+)
+
+
+# ---------- REFERENCE ----------
+
+def _norm_id(id_or_url: str) -> str:
+    return id_or_url.replace("arXiv:", "").strip()
+
+
+def is_cited(ref: dict[str, Any], body: str) -> bool:
+    """본문에서 실제로 인용됐는가 (설계서 6장 — 미인용 자료는 제외).
+
+    논문: arXiv id 또는 제목이 본문에 있거나, 본문에 `[논문 p.N]` 태그가 하나라도 있으면 인용으로 본다
+          (선정 논문 2편이 RAG 코퍼스라 `[논문]` 태그는 이 둘을 가리킨다).
+    웹·특허: URL/번호 또는 제목이 본문에 있어야 한다.
+    """
+    ident = _norm_id(ref["id_or_url"])
+    if ident and ident in body:
+        return True
+    if ref["title"] and ref["title"] in body:
+        return True
+    if ref["type"] == "논문" and "[논문" in body:
+        return True
+    return False
+
+
+def format_ref(ref: dict[str, Any]) -> str:
+    """설계서 6장 REFERENCE 표기 형식."""
+    t = ref["type"]
+    if t == "논문":
+        # 저자(YYYY). 논문제목. *학술지/학회명*, 권(호), 페이지.
+        venue = f" *{ref['venue']}*." if ref.get("venue") else ""
+        return f"{ref['authors']}({ref['year']}). {ref['title']}.{venue} {ref['id_or_url']}.".replace("..", ".")
+    if t == "특허":
+        # 출원인(YYYY-MM). *특허명*, 특허번호/공개번호, URL
+        return f"{ref['authors']}({ref['year']}). *{ref['title']}*, {ref['id_or_url']}."
+    # 기타(웹): 기관명 또는 작성자(YYYY-MM-DD). *제목*. 사이트명, URL
+    return f"{ref['authors']}({ref.get('accessed') or ref['year']}). *{ref['title']}*. {ref['venue']}, {ref['id_or_url']}"
+
+
+def render_reference(citations: list[dict[str, Any]], body: str) -> str:
+    seen: set[str] = set()
+    lines: list[str] = []
+    for ref in citations:
+        key = _norm_id(ref["id_or_url"]) or ref["title"]
+        if key in seen or not is_cited(ref, body):
+            continue
+        seen.add(key)
+        lines.append(f"- {format_ref(ref)}")
+    return "\n".join(lines) if lines else "- (본문에 인용된 자료 없음)"
+
+
+# ---------- 2. 기술 선정 (config/selection.yaml → State.selected) ----------
+
+def render_selection(selected: dict[str, Any]) -> str:
+    out = ["**선정 기준** (설계서 1.1)", ""]
+    for c in selected.get("criteria", []):
+        out.append(f"- **{c['label']}** — {c['question']}")
+    out += ["", "**선정 기술**", ""]
+    for side, label in (("sw", "SW"), ("hw", "HW")):
+        s = selected.get(side, {})
+        if not s:
+            continue
+        out.append(f"- **{label} · {s['name']}** — {s['paper']} ({s.get('venue', '')}, arXiv:{s.get('arxiv', '')}, {s.get('pages', '?')}p)")
+        out.append(f"  - {s.get('reason', '').strip()}")
+    excluded = selected.get("excluded", [])
+    if excluded:
+        out += ["", "**검토했으나 제외한 후보**", ""]
+        for e in excluded:
+            out.append(f"- {e['name']} ({e['side'].upper()}) — {e['reason']}")
+    return "\n".join(out)
+
+
+# ---------- 4. 관점별 평가 (*_eval · trl_estimate) ----------
+
+def _bullets(items: list[str], indent: str = "  ") -> list[str]:
+    return [f"{indent}- {x}" for x in items] if items else [f"{indent}- 근거 없음"]
+
+
+def _eval_block(tech: str, e: dict[str, Any]) -> list[str]:
+    out = [f"**{tech}** — 등급: {e.get('grade', '근거 없음')}"]
+    if e.get("verdict"):
+        out.append(f"  - 판정: {e['verdict']}")
+    if e.get("rationale"):
+        out.append(f"  - 근거: {e['rationale']}")
+    out.append("  - 긍정:")
+    out += _bullets(e.get("positives", []), "    ")
+    out.append("  - 부정:")
+    out += _bullets(e.get("negatives", []), "    ")
+    if e.get("axes"):
+        out.append("  - 3축: " + " · ".join(f"{k} — {v}" for k, v in e["axes"].items()))
+    if "confidence" in e:
+        out.append(f"  - confidence: {e['confidence']}")
+    return out
+
+
+def render_evaluation(state: dict[str, Any]) -> str:
+    out: list[str] = []
+    trl = state.get("trl_estimate") or {}
+    out.append("### 4.1 기술 성숙도 (TRL — 공개 정보 기반 추정, 기준 시점 명시)")
+    out.append("")
+    for tech in TECHS:
+        t = trl.get(tech)
+        if not t:
+            out.append(f"**{tech}** — 근거 없음")
+            continue
+        out.append(f"**{tech}** — TRL {t['level']} (기준 시점: {t.get('reference_date', '미기재')})")
+        out += _bullets(t.get("basis", []))
+    out.append("")
+    out.append("TRL 4~6 구간은 수율·성능 수치가 비공개라 정보 공백이 크고, 발표 시점과 채택 사이에 시차가 있다. 위 등급은 공개 정보 기반 추정이다.")
+    for num, title, key in (
+        ("4.2", "시장", "market_eval"),
+        ("4.3", "이해관계자 (찬 · 반)", "stakeholder_eval"),
+        ("4.4", "도메인 — 스마트폰 온디바이스 (적합 / 조건부 / 부적합 + 포기한 축)", "domain_eval"),
+    ):
+        out += ["", f"### {num} {title}", ""]
+        evals = state.get(key) or {}
+        for tech in TECHS:
+            e = evals.get(tech)
+            out += _eval_block(tech, e) if e else [f"**{tech}** — 근거 없음"]
+            out.append("")
+    return "\n".join(out).rstrip()
+
+
+# ---------- 6. 한계점 — 수치 계산 ----------
+
+def _tagged_statements(state: dict[str, Any]) -> list[str]:
+    """출처 태그가 붙은 판단 문장을 전부 모은다 (evals · tech_summary · synthesis)."""
+    found: list[str] = []
+
+    def walk(x: Any) -> None:
+        if isinstance(x, str):
+            if TAG_RE.search(x):
+                found.append(x)
+        elif isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    for key in ("market_eval", "stakeholder_eval", "domain_eval", "tech_summary", "synthesis", "trl_estimate"):
+        walk(state.get(key))
+    return found
+
+
+def limitation_stats(state: dict[str, Any]) -> dict[str, Any]:
+    stmts = _tagged_statements(state)
+    inference_only = [s for s in stmts if TAG_RE.findall(s) and all(t == "추론" for t in TAG_RE.findall(s))]
+    log = state.get("retrieval_log") or []
+    rewritten = [r for r in log if r.get("rewritten")]
+    return {
+        "tagged_total": len(stmts),
+        "inference_only": len(inference_only),
+        "inference_ratio": round(len(inference_only) / len(stmts), 2) if stmts else None,
+        "retrieval_total": len(log),
+        "no_evidence": sum(1 for r in log if r.get("relevance") == "no_evidence"),
+        "rewritten": len(rewritten),
+        "rewrite_recovered": sum(1 for r in rewritten if r.get("relevance") == "yes"),
+        "by_tech_no_evidence": {t: sum(1 for r in log if r.get("tech") == t and r.get("relevance") == "no_evidence") for t in TECHS},
+        "neutrality_violations": list((state.get("neutrality") or {}).get("violations") or []),
+    }
+
+
+def render_limitations(state: dict[str, Any], stats: dict[str, Any] | None = None,
+                       retrieval_metrics: dict[str, Any] | None = None) -> str:
+    """설계서 6장 한계점 6항목. retrieval_metrics = {"hit@4":…, "mrr@4":…, "ragas": {...}} (A 의 rag.evaluate 결과, 없으면 TBD)."""
+    st = stats or limitation_stats(state)
+    m = retrieval_metrics or {}
+    ratio = "계산 불가(태그 문장 없음)" if st["inference_ratio"] is None else f"{st['inference_ratio']:.0%} ({st['inference_only']}/{st['tagged_total']})"
+    hit = m.get("hit@4", "TBD")
+    mrr = m.get("mrr@4", "TBD")
+    ragas = m.get("ragas") or {}
+    rewrite = (f"재작성 {st['rewritten']}건 중 {st['rewrite_recovered']}건이 관련 문서를 찾았다"
+               if st["rewritten"] else "재작성이 발생하지 않았다")
+    no_ev = st["no_evidence"]
+    by_tech = " · ".join(f"{t} {n}건" for t, n in st["by_tech_no_evidence"].items())
+    viol = st["neutrality_violations"]
+    viol_line = (f" 중립성 검증에서 반려 상한(2회) 후에도 남은 위반 표현 {len(viol)}건: " + "; ".join(viol)) if viol else ""
+    return "\n".join([
+        "1. **공개 정보 기반 추정의 한계** — TRL 4~6 구간은 수율·성능 수치가 비공개라 정보 공백이 가장 크다. 4.1 의 등급은 공개 코드·재현·프레임워크 통합 여부만으로 추정한 것이다.",
+        "2. **TRL 기준 시점** — arXiv v1 과 학회 게재·가이드 표기 시점이 논문마다 다르다(KIVI: v1 2024-02 / ICML 2024-07, InfiniGen: v1 2024-06 / OSDI 2024-07). 기준 시점에 따라 추정이 달라진다 — 발표 시점과 채택 간 시차의 구체 사례다.",
+        "3. **사전 가설과 확증편향 방지 조치** — 사전 가설 *\"온디바이스에서는 SW 압축이 더 적합할 것\"* 을 명시하고 장치 8개(기술별 독립 호출 · 사실 단위 질의 · 정확도 임계값 없음 · 근거 없음 기록 · 출처 태그 강제 · 반대 근거 ≥2 · 중립성 검증 루프)를 적용했다. 판정 기준(재학습 불필요 · 전용 HW 불필요)은 배포 용이성에 가중을 두므로 구조적으로 SW 접근에 유리하다 — 도메인의 실제 제약을 반영한 것이지만 기준 선택 자체가 결과에 영향을 준다. Memory · Recall · Latency 3축은 판정이 아닌 해석에만 썼다." + viol_line,
+        f"4. **`[추론]` 태그 비율** — 판단 문장 {st['tagged_total']}건 중 논문·웹 근거 없이 추론에만 의존한 문장 {ratio}.",
+        f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다.",
+        f"6. **질의 재작성 효과** — {rewrite}. 효과가 없으면 재작성 단계 제거를 검토한다.",
+    ])
+
+
+# ---------- 조립 ----------
+
+def assemble(title: str, chapters: dict[str, str]) -> str:
+    """CHAPTERS 순서로 조립. 없는 장은 '작성되지 않음' 으로 표시해 목차가 깨지지 않게 한다."""
+    parts = [f"# {title}", ""]
+    for key, heading in CHAPTERS:
+        parts.append(f"## {heading}")
+        parts.append("")
+        parts.append(chapters.get(key) or "_(작성되지 않음)_")
+        parts.append("")
+    return "\n".join(parts).rstrip() + "\n"
