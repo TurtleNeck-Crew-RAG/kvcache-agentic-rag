@@ -1,0 +1,15 @@
+{
+  "_note": "market_eval · stakeholder_eval · domain_eval 예시 — C synthesis · D report 개발용. 내용은 형식 확인용 placeholder",
+  "market_eval": {
+    "KIVI": {"grade": "중", "rationale": "vLLM·HF 생태계에서 KV 양자화 옵션이 늘고 있으나 KIVI 자체 채택 사례는 제한적", "positives": ["오픈소스 구현 공개 [웹 https://github.com/jy-yuan/KIVI]"], "negatives": ["서빙 프레임워크 공식 통합 없음 [웹 URL]", "상용 제품 적용 사례 미확인 [추론]"], "evidence": [], "confidence": 0.6},
+    "InfiniGen": {"grade": "하", "rationale": "학술 구현 단계", "positives": ["OSDI 게재로 시스템 커뮤니티 인지도 [웹 URL]"], "negatives": ["공개 구현 활성도 낮음 [웹 URL]", "제품 적용 사례 없음 [추론]"], "evidence": [], "confidence": 0.5}
+  },
+  "stakeholder_eval": {
+    "KIVI": {"grade": "찬반 혼재", "rationale": "", "positives": ["개발자: 무보정이라 적용 쉬움 [웹 URL]", "학계: 후속 연구 다수 인용 [웹 URL]"], "negatives": ["서빙 프레임워크: 비공식 구현 [웹 URL]", "경쟁 진영(MLA): 사후 압축은 근본 해결 아님 [웹 URL]"], "evidence": [], "confidence": 0.6},
+    "InfiniGen": {"grade": "찬반 혼재", "rationale": "", "positives": ["시스템 연구자: 정확도 무손실 [웹 URL]", "HW 진영: 메모리 계층 활용 방향성 [웹 URL]"], "negatives": ["Apple LLM in a flash 와 차별점 불명확 [웹 URL]", "모바일 적용 검증 없음 [웹 URL]"], "evidence": [], "confidence": 0.5}
+  },
+  "domain_eval": {
+    "KIVI": {"grade": "조건부", "verdict": "조건부", "rationale": "재학습 없이 적용되나 GQA/MQA 소형 모델에서 손실 커질 수 있음", "positives": ["재학습 불필요 [논문 p.1]"], "negatives": ["MQA 2bit 정확도 하락 [논문 p.7]"], "axes": {"memory": "2.6× 확보", "recall": "2bit 손실 — 임계값 없이 보고", "latency": "양자화 오버헤드 [추론]"}, "evidence": [], "confidence": 0.6},
+    "InfiniGen": {"grade": "조건부", "verdict": "조건부", "rationale": "전용 HW 불필요하나 폰 플래시 대역폭에서 미검증", "positives": ["정확도 무손실 [논문 p.1]"], "negatives": ["PCIe 서버 기준 실험 [논문 p.9]", "LLM in a flash 가 이미 유사 접근 [웹 URL]"], "axes": {"memory": "오프로딩으로 확보", "recall": "무손실", "latency": "전송 지연 — 폰에서 미검증 [추론]"}, "evidence": [], "confidence": 0.5}
+  }
+}

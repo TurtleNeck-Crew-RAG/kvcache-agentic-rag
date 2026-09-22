@@ -23,8 +23,6 @@ body:
       label: About
       description: 구현하려는 기능 — 목적, 입력 State 키 → 출력 State 키
       placeholder: "예: 이해관계자 워커. 입력 tech_summary → 출력 stakeholder_eval[tech] (negatives ≥2)"
-    validations:
-      required: true
 
   - type: input
     id: design
@@ -32,8 +30,6 @@ body:
       label: 설계서 근거
       description: docs/설계서.md 의 절 번호 (표 행까지 적으면 좋음)
       placeholder: "예: 2장 표 '이해관계자 평가' 행 + 4.3 Rubric + 5.3 규칙 2'"
-    validations:
-      required: true
 
   - type: textarea
     id: todo
@@ -42,8 +38,6 @@ body:
       value: |
         - [ ] Task 1
         - [ ] Task 2
-    validations:
-      required: true
 
   - type: textarea
     id: dod
