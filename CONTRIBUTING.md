@@ -245,5 +245,6 @@ body:                      # 위에서부터 순서대로 렌더링
 | `config.yml` 을 템플릿으로 착각 | 템플릿이 아니라 **선택 화면 설정** |
 
 > **템플릿은 `main` 에 있어야 보입니다.** PR 브랜치에만 있으면 이슈 생성 화면에 안 뜹니다.
+> **PR 템플릿은 저장소 화면 어디에도 따로 안 보입니다.** 브랜치를 푸시하고 `Compare & pull request` 를 눌렀을 때 PR 본문에 자동으로 채워지는 게 전부입니다.
 > 템플릿 PR 을 가장 먼저 머지하고 `…/issues/new/choose` 에서 확인하세요.
 > `config.yml` 의 링크는 `TurtleNeck-Crew-RAG/kvcache-agentic-rag` 기준입니다.
