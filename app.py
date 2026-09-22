@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -60,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     load_dotenv()
+    if args.pdf_name:
+        os.environ["REPORT_PDF_NAME"] = args.pdf_name   # 보고서 워커의 save() 가 이 이름으로 PDF 를 쓴다 (그래프 실행 전에)
     domain = yaml.safe_load(Path("config/domain.yaml").read_text(encoding="utf-8"))
     selected = yaml.safe_load(Path("config/selection.yaml").read_text(encoding="utf-8"))
     _ensure_index(args.skip_index)

@@ -37,3 +37,25 @@ def test_dump_writes_run_json_and_filled_keys_only(app_module, tmp_path):
     assert (tmp_path / "citations.json").exists()
     assert not (tmp_path / "synthesis.json").exists()          # None 인 키는 파일을 만들지 않는다
     assert not (tmp_path / "market_eval.json").exists()        # init_state 의 빈 {} 도 만들지 않는다 (실측 2026-09-22 — 2바이트 파일 5개)
+
+
+def test_pdf_name_is_exported_before_graph_runs(app_module, monkeypatch):
+    """--pdf-name 은 보고서 워커가 읽는 env 로 그래프 실행 전에 넘어가야 한다 (4회차 실측: 안 넘어가 report.pdf 로만 저장됨)."""
+    import os
+
+    seen = {}
+
+    def fake_build_graph():
+        seen["env"] = os.environ.get("REPORT_PDF_NAME")
+        raise RuntimeError("stop")               # 그래프는 실행하지 않는다
+
+    monkeypatch.setattr(app_module, "build_graph", fake_build_graph)
+    monkeypatch.setattr(app_module, "_ensure_index", lambda skip: None)
+    monkeypatch.setattr(app_module.yaml, "safe_load", lambda *_: {})
+    monkeypatch.setattr(app_module.Path, "read_text", lambda *_a, **_k: "")
+    monkeypatch.delenv("REPORT_PDF_NAME", raising=False)
+    try:
+        app_module.main(["--skip-index", "--pdf-name", "RAG-Output_test.pdf"])
+    except RuntimeError:
+        pass
+    assert seen["env"] == "RAG-Output_test.pdf"
