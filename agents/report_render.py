@@ -98,24 +98,25 @@ def render_selection(selected: dict[str, Any]) -> str:
 
 # ---------- 4. 관점별 평가 (*_eval · trl_estimate) ----------
 
-def _bullets(items: list[str], indent: str = "  ") -> list[str]:
+def _bullets(items: list[str], indent: str = "    ") -> list[str]:
     return [f"{indent}- {x}" for x in items] if items else [f"{indent}- 근거 없음"]
 
 
 def _eval_block(tech: str, e: dict[str, Any]) -> list[str]:
-    out = [f"**{tech}** — 등급: {e.get('grade', '근거 없음')}"]
+    """중첩 목록은 4칸 들여쓰기 — python-markdown(PDF 변환)은 2칸 들여쓰기를 목록으로 보지 않아 한 문단으로 뭉쳤다(7회차 PDF 6쪽)."""
+    out = [f"- **{tech}** — 등급: {e.get('grade', '근거 없음')}"]
     if e.get("verdict"):
-        out.append(f"  - 판정: {e['verdict']}")
+        out.append(f"    - 판정: {e['verdict']}")
     if e.get("rationale"):
-        out.append(f"  - 근거: {e['rationale']}")
-    out.append("  - 긍정:")
-    out += _bullets(e.get("positives", []), "    ")
-    out.append("  - 부정:")
-    out += _bullets(e.get("negatives", []), "    ")
+        out.append(f"    - 근거: {e['rationale']}")
+    out.append("    - 긍정:")
+    out += _bullets(e.get("positives", []), "        ")
+    out.append("    - 부정:")
+    out += _bullets(e.get("negatives", []), "        ")
     if e.get("axes"):
-        out.append("  - 3축: " + " · ".join(f"{k} — {v}" for k, v in e["axes"].items()))
+        out.append("    - 3축: " + " · ".join(f"{k} — {v}" for k, v in e["axes"].items()))
     if "confidence" in e:
-        out.append(f"  - confidence: {e['confidence']}")
+        out.append(f"    - confidence: {e['confidence']}")
     return out
 
 
@@ -127,9 +128,9 @@ def render_evaluation(state: dict[str, Any]) -> str:
     for tech in TECHS:
         t = trl.get(tech)
         if not t:
-            out.append(f"**{tech}** — 근거 없음")
+            out.append(f"- **{tech}** — 근거 없음")
             continue
-        out.append(f"**{tech}** — TRL {t['level']} (기준 시점: {t.get('reference_date', '미기재')})")
+        out.append(f"- **{tech}** — TRL {t['level']} (기준 시점: {t.get('reference_date', '미기재')})")
         out += _bullets(t.get("basis", []))
     out.append("")
     out.append("TRL 4~6 구간은 수율·성능 수치가 비공개라 정보 공백이 크고, 발표 시점과 채택 사이에 시차가 있다. 위 등급은 공개 정보 기반 추정이다.")
@@ -142,7 +143,7 @@ def render_evaluation(state: dict[str, Any]) -> str:
         evals = state.get(key) or {}
         for tech in TECHS:
             e = evals.get(tech)
-            out += _eval_block(tech, e) if e else [f"**{tech}** — 근거 없음"]
+            out += _eval_block(tech, e) if e else [f"- **{tech}** — 근거 없음"]
             out.append("")
     return "\n".join(out).rstrip()
 
