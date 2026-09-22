@@ -24,7 +24,9 @@ class _Retriever:
 
 
 def _patch(monkeypatch, *, retriever, relevance, generate=None, faithful=True):
-    monkeypatch.setattr(rn, "get_retriever", lambda *a, **k: retriever)
+    # hybrid_search(tech, q_dense, q_sparse) — 테스트는 dense 질의 기준으로 결과를 돌려준다
+    monkeypatch.setattr(rn, "hybrid_search", lambda tech, qd, qs, **k: retriever.invoke(qd))
+    monkeypatch.setattr(rn, "translate_query", lambda q: "EN " + q)
     monkeypatch.setattr(rn, "check_relevance", lambda q, docs: relevance(q))
     monkeypatch.setattr(rn, "rewrite_query", lambda q, *a: "REWRITTEN " + q)
     monkeypatch.setattr(rn, "_generate", lambda tech, q, docs: generate)
@@ -40,7 +42,7 @@ def test_happy_path_no_rewrite(monkeypatch):
     assert r["citations"][0]["id_or_url"] == "arXiv:2402.02750"
     e = r["retrieval_entry"]
     assert e["relevance"] == "yes" and not e["rewritten"] and e["hits_before"] == ["a", "b"]
-    assert r["llm_calls"] == 3          # judge1 + generator + judge2
+    assert r["llm_calls"] == 4          # translate + judge1 + generator + judge2
 
 
 def test_rewrite_then_success(monkeypatch):
@@ -51,7 +53,7 @@ def test_rewrite_then_success(monkeypatch):
     e = r["retrieval_entry"]
     assert e["rewritten"] and e["query_after"] == "REWRITTEN q"
     assert e["hits_before"] == ["x"] and e["hits_after"] == ["hit"] and e["relevance"] == "yes"
-    assert r["answer"] == "A6000 [p.9]" and r["llm_calls"] == 5
+    assert r["answer"] == "A6000 [p.9]" and r["llm_calls"] == 6
 
 
 def test_no_evidence_after_rewrite(monkeypatch):
@@ -59,7 +61,7 @@ def test_no_evidence_after_rewrite(monkeypatch):
     r = ask("KIVI", "q", node="t")
     assert r["answer"] == NO_EVIDENCE and r["evidence"] == [] and r["citations"] == []
     assert r["retrieval_entry"]["relevance"] == "no_evidence" and r["retrieval_entry"]["rewritten"]
-    assert r["llm_calls"] == 3          # judge1 + rewrite + judge1
+    assert r["llm_calls"] == 4          # translate + judge1 + rewrite + judge1
 
 
 def test_generator_declines(monkeypatch):
