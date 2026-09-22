@@ -28,11 +28,11 @@ FACT_QUESTIONS = (
     "정확도 손실 수치와 그 실험 조건은 무엇인가?",
     "전송, 프리패치 또는 추가 연산 오버헤드는 무엇인가?",
 )
-SOURCE_TAG = re.compile(r"\[(?:논문(?: p\.\d+)?|웹(?: [^\]]+)?|추론)\]")
+SOURCE_TAG = re.compile(r"\[(?:논문|웹|추론|p\.\d)[^\]]*\]")   # [논문 p.2, p.9] · [논문 2406.19707 p.9] · [p.3] · [웹 URL] · [추론] — 실출력은 쪽을 여러 개 묶는다(5회차)
 
 
 def _require_source_tag(value: str) -> str:
-    if value.strip() != "근거 없음" and not SOURCE_TAG.search(value):
+    if "근거 없음" not in value and not SOURCE_TAG.search(value):   # "…(논문에 근거 없음)." 도 근거 없음 기록으로 인정
         raise ValueError("판단 문장에 출처 태그가 필요합니다")
     return value
 
