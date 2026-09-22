@@ -11,8 +11,8 @@
     r["llm_calls"]         # 이 호출에서 쓴 LLM 횟수
     r["faithful"]          # Judge 2 결과. False 면 unsupported 에 문장 목록
 
-흐름: 검색(k=4, tech 필터) → Judge1 관련성 → (no) 재작성 1회 → 재검색 → Judge1
-      → (no) "논문에 근거 없음" 기록 / (yes) 생성 [p.N] → Judge2 Faithfulness
+흐름: 번역(영어 sparse 질의) → 이중 질의 하이브리드 검색(k=4, tech 필터) → Judge1 관련성
+      → (no) 재작성 1회 → 재검색 → Judge1 → (no) "논문에 근거 없음" 기록 / (yes) 생성 [p.N] → Judge2 Faithfulness
 """
 from __future__ import annotations
 
@@ -23,8 +23,14 @@ from pydantic import BaseModel, Field
 
 from agents._common import llm, render_prompt
 from graph.state import Evidence, Ref, RetrievalEntry
-from rag.judge import check_faithfulness, check_relevance, format_context, rewrite_query
-from rag.retriever import SparseKind, get_retriever
+from rag.judge import (
+    check_faithfulness,
+    check_relevance,
+    format_context,
+    rewrite_query,
+    translate_query,
+)
+from rag.retriever import DEFAULT_SPARSE, SparseKind, hybrid_search
 
 NO_EVIDENCE = "논문에 근거 없음"
 
@@ -67,13 +73,18 @@ def _generate(tech: str, question: str, docs: list[Document]) -> RagAnswer:
     return gen
 
 
-def ask(tech: str, question: str, node: str, *, sparse: SparseKind | None = "m3", k: int = 4) -> dict:
-    retriever = get_retriever(tech, sparse=sparse, k=k)
+def ask(tech: str, question: str, node: str, *, sparse: SparseKind | None = DEFAULT_SPARSE, k: int = 4) -> dict:
     calls = 0
     arxiv = PAPERS[tech]["id_or_url"].removeprefix("arXiv:")
 
-    # ── 검색 + Judge 1 ──────────────────────────────────────────────
-    docs = retriever.invoke(question)
+    def search(q_dense: str, q_sparse: str) -> list[Document]:
+        return hybrid_search(tech, q_dense, q_sparse, sparse=sparse, k=k)
+
+    # ── 이중 질의 검색 + Judge 1 ─────────────────────────────────────
+    # dense 는 한국어 원 질의, sparse(BM25) 는 영어 번역 질의 (retriever.py 실측 근거)
+    q_en = translate_query(question) if sparse else question
+    calls += 1 if sparse else 0
+    docs = search(question, q_en)
     relevant = check_relevance(question, docs)
     calls += 1
     entry: RetrievalEntry = {
@@ -86,7 +97,7 @@ def ask(tech: str, question: str, node: str, *, sparse: SparseKind | None = "m3"
     # ── Loop 1: 재작성 1회 ──────────────────────────────────────────
     if not relevant:
         q2 = rewrite_query(question, tech, PAPERS[tech]["title"], docs)
-        docs2 = retriever.invoke(q2)
+        docs2 = search(q2, q2)                        # 재작성 질의는 영어라 양쪽에 그대로
         relevant = check_relevance(q2, docs2)
         calls += 2
         entry.update({
@@ -121,4 +132,5 @@ def ask(tech: str, question: str, node: str, *, sparse: SparseKind | None = "m3"
         "answer": gen.answer, "evidence": evidence, "retrieval_entry": entry,
         "citations": [PAPERS[tech]], "llm_calls": calls,
         "faithful": faith.faithful, "unsupported": faith.unsupported,
+        "contexts": [d.page_content for d in docs],      # RAGAS 평가용 (State 에는 넣지 않음)
     }

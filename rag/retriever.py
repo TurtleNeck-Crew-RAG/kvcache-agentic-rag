@@ -1,14 +1,19 @@
 """런타임 검색 — 그림 1(b).  [소유: A 박유진]
 
-EnsembleRetriever(sparse + dense, 0.5/0.5, RRF), k=4, `tech` 메타데이터 필터 (설계서 3.4).
+hybrid_search(tech, dense_query, sparse_query) — dense + sparse RRF 0.5/0.5, k=4, `tech` 필터 (설계서 3.4).
+**이중 질의**: dense 는 한국어 원 질의, sparse(BM25) 는 영어 번역 질의. 실측(#11, 20문항) 근거:
+  dense-ko 0.55 / hybrid-m3-ko 0.45 / hybrid-bm25-ko 0.40  ← 한국어 질의에 sparse 를 섞으면 오히려 나빠짐
+  dense-ko + bm25-en(mini 번역) 0.80                        ← 목표 Hit@4 ≥ 0.80 달성
+설계서 3.4 초기값(BGE-M3 sparse)은 실측에서 뒤집힘 — 보고서 한계점 5 에 기록.
 
-sparse 후보 2개를 같은 인터페이스로 두고 실측(#11)으로 확정:
-- "m3"   : BGE-M3 learned sparse — data/index/sparse_m3.json (초기값, 다국어 표면형 차이를 용어 확장으로 흡수)
-- "bm25" : rank_bm25 — data/index/chunks.jsonl 로 즉석 생성 (표면형 정확 일치)
-- None   : dense 단독 (베이스라인)
+sparse 후보는 그대로 전환 가능 (평가 스크립트가 5 모드를 비교):
+- "bm25" : rank_bm25 — data/index/chunks.jsonl 로 즉석 생성 (확정값)
+- "m3"   : BGE-M3 learned sparse — data/index/sparse_m3.json (IDF 가 없어 빈출 토큰이 점수를 지배)
+- None   : dense 단독
 
-    from rag.retriever import get_retriever
-    docs = get_retriever("KIVI").invoke("피크 메모리는 얼마나 줄어드는가?")
+    from rag.retriever import hybrid_search, get_retriever
+    docs = hybrid_search("KIVI", "피크 메모리는 얼마나 줄어드는가?", "KIVI peak memory reduction")
+    docs = get_retriever("KIVI", sparse=None).invoke("...")     # 단일 질의 (평가용)
 """
 from __future__ import annotations
 
@@ -29,6 +34,8 @@ from rag.indexing import CHROMA_DIR, CHUNKS_PATH, COLLECTION, SPARSE_PATH, get_e
 
 TOP_K = 4
 WEIGHTS = (0.5, 0.5)          # (sparse, dense)
+DEFAULT_SPARSE = "bm25"       # 실측(#11)으로 확정
+RRF_C = 60
 SparseKind = Literal["m3", "bm25"]
 
 
@@ -95,11 +102,33 @@ class DenseRetriever(BaseRetriever):
         return _chroma().similarity_search(query, k=self.k, filter={"tech": self.tech})
 
 
-def get_retriever(tech: str, sparse: SparseKind | None = "m3", k: int = TOP_K) -> Runnable[str, list[Document]]:
-    """설계서 3.4 — Ensemble sparse+dense 0.5/0.5, k=4, tech 필터.
+def rrf(ranked_lists: list[list[Document]], weights=WEIGHTS, k: int = TOP_K, c: int = RRF_C) -> list[Document]:
+    """Reciprocal Rank Fusion — EnsembleRetriever 와 같은 식. 리스트마다 질의가 달라도 됨."""
+    score: dict[str, float] = {}
+    by_id: dict[str, Document] = {}
+    for docs, w in zip(ranked_lists, weights, strict=True):
+        for rank, d in enumerate(docs, 1):
+            cid = d.metadata["chunk_id"]
+            by_id[cid] = d
+            score[cid] = score.get(cid, 0.0) + w / (c + rank)
+    return [by_id[cid] for cid, _ in sorted(score.items(), key=lambda x: -x[1])[:k]]
 
-    sparse=None 이면 dense 단독 (실측 베이스라인).
-    """
+
+def hybrid_search(
+    tech: str, dense_query: str, sparse_query: str, *,
+    sparse: SparseKind | None = DEFAULT_SPARSE, k: int = TOP_K, weights=WEIGHTS,
+) -> list[Document]:
+    """이중 질의 하이브리드 — dense(한국어 원 질의) + sparse(영어 질의) RRF. sparse=None 이면 dense 만."""
+    dense_docs = DenseRetriever(tech=tech, k=2 * k).invoke(dense_query)
+    if sparse is None:
+        return dense_docs[:k]
+    base, _ = get_embeddings()
+    sp = SparseRetriever(tech=tech, kind=sparse, k=2 * k, query_encoder=base)
+    return rrf([sp.invoke(sparse_query), dense_docs], weights, k)
+
+
+def get_retriever(tech: str, sparse: SparseKind | None = DEFAULT_SPARSE, k: int = TOP_K) -> Runnable[str, list[Document]]:
+    """단일 질의 Ensemble (평가·비교용). 런타임은 hybrid_search 를 쓴다."""
     dense = DenseRetriever(tech=tech, k=k)
     if sparse is None:
         return dense

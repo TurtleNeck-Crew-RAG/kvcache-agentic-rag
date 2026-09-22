@@ -13,6 +13,7 @@
 | `report.md` | 보고서 — 6장 목차 + REFERENCE 표기 형식 | D | 6 |
 | `rag_generator.md` | RAG 답변 생성 — `[p.N]` 태그, "문서에 없으면 없다고" | A | 5.4 |
 | `rag_relevance.md` / `rag_rewrite.md` / `rag_faithfulness.md` | Judge 1·2, 질문 재작성 | A | 3.7 |
+| `rag_translate.md` | 한국어 질의 → BM25 용 영어 검색 질의 (이중 질의 하이브리드) | A | 3.4 실측 |
 | `rubrics/` | 4.1~4.5 Rubric 원문 — 프롬프트에서 include | 각 관점 소유자 | 4 |
 
 공통 규칙 (모든 프롬프트에 포함)
