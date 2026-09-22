@@ -53,3 +53,12 @@ def test_graph_reaches_end_when_all_workers_fail():
     assert visited[-1] == [END]
     assert visited.count(["stakeholder"]) == MAX_RETRY["stake"]          # 2' 두 번 → 2'' 진행
     assert s["report_md"].startswith("# 보고서 생성 실패")
+
+
+def test_safe_reason_is_single_short_line():
+    def boom(state):
+        raise ValueError("6 validation errors for X\nrationale\n  Value error, 판단 문장에 출처 태그가 필요합니다 …\n" + "x" * 500)
+
+    e = safe("domain", boom)({})["domain_eval"]["KIVI"]
+    assert "\n" not in e["rationale"] and len(e["rationale"]) < 200
+    assert e["rationale"].startswith("워커 실패 — ValueError: 6 validation errors for X")

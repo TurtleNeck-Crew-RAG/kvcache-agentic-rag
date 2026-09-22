@@ -48,6 +48,13 @@ def fallback(name: str, reason: str) -> dict[str, Any]:
     return {}
 
 
+def _short(e: BaseException, limit: int = 160) -> str:
+    """보고서에 들어갈 실패 사유 — 예외 첫 줄만, 길면 자른다 (pydantic ValidationError 는 수십 줄이라 그대로 넣으면 4장이 깨진다. 실측 5회차)."""
+    first = str(e).strip().splitlines()[0] if str(e).strip() else ""
+    text = f"{type(e).__name__}: {first}"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def safe(name: str, fn: Callable[[dict], dict]) -> Callable[[dict], dict]:
     """워커 run(state) 를 감싼다. 정상이면 그대로, 예외면 fallback(name) + 표준에러 로그."""
 
@@ -55,7 +62,7 @@ def safe(name: str, fn: Callable[[dict], dict]) -> Callable[[dict], dict]:
         try:
             out = fn(state)
         except Exception as e:                    # noqa: BLE001 — 어떤 예외든 실패 기록으로 바꾸는 것이 목적
-            reason = f"{type(e).__name__}: {e}"
+            reason = _short(e)
             print(f"[safe] {name} 실패 → 실패 기록으로 대체: {reason}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
             return fallback(name, reason)
