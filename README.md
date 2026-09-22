@@ -50,6 +50,8 @@
 
 ![graph](docs/images/graph.png)
 
+설계 그림(위)과 `python -m graph.build` 가 그린 컴파일 결과([graph_compiled.png](docs/images/graph_compiled.png))가 같다 — 워커 6개가 전부 `dispatcher` 로 수렴하고, 조건부 엣지가 7갈래(+END)로 나간다.
+
 인덱싱 → ① 기술 조사 → ② 평가 3개 병렬(fan-out, 분리 키) → ③ 종합 + 중립성 Judge → ④ 보고서.
 Loop: 관련성 재작성 ≤1(RAG 노드 내부) · 반대 근거 부족 ≤2 · 중립성 반려 ≤2. `llm_calls > 100` 이면 재호출 중단.
 
@@ -76,11 +78,14 @@ RAG 파이프라인: [전처리](docs/images/pipeline_pre.png) · [검색·관�
 ## Usage
 
 ```bash
-uv sync                          # Python 3.11, .venv
+uv sync --extra pdf              # Python 3.11, .venv — md→PDF 는 weasyprint(brew install pango)
 cp .env.example .env             # OPENAI_API_KEY · TAVILY_API_KEY · LANGSMITH_API_KEY
 bash scripts/fetch_papers.sh     # arXiv 2402.02750, 2406.19707 → data/papers/
 uv run python -m rag.indexing    # BGE-M3 임베딩(첫 실행 시 모델 다운로드) → data/index/
 uv run python app.py             # 그래프 실행 → outputs/report/report.md (+ .pdf)
+#   --skip-index                    인덱싱 건너뜀 / --pdf-name <파일명>  제출용 PDF 이름
+#   실패해도 outputs/run.json (visited · llm_calls · retry · error) 과 채워진 State 키의 .json 은 남는다
+uv run python -m agents.report   # 보고서 워커만 fixtures 로 단독 실행 (LLM 4회)
 
 uv run python -m rag.evaluate    # Hit Rate@4 · MRR@4 · RAGAS
 uv run pytest                    # 단위 테스트
