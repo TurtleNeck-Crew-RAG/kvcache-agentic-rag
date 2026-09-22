@@ -117,7 +117,7 @@ uv run pytest                    # 단위 테스트
 
 실행마다 결과가 달라진다(검색 · LLM 비결정성). 위는 제출본을 만든 실행이고, `outputs/run.json` 에 같은 항목이 남는다. 이전 6회 실행의 경과 — 1·2회 fan-out 형제 예외 → 3회 안전 래퍼로 END → 4회 첫 전체 실행(103회) → 5·6회 validator 회귀 2건 → 7회 완전 — 는 [#6](https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/issues/6) 코멘트에 있다.
 
-## Presentation — 10분 (README 로만)
+## Presentation 
 
 1. **차별점 (3분)** — ① 리더보드가 아니라 우리 질의로 임베딩·sparse 를 실측해 설계 초기값을 뒤집었다(Hit@4 0.55 → 0.80) ② 편향 방지 8장치를 State 로 구현 — 기술별 독립 호출 · 사실 단위 질의 · 출처 태그 강제 · 반대 근거 ≥2 재검색 · 중립성 Judge 루프, 그리고 `[추론]` 비율이 한계점 수치로 자동 계산된다 ③ 규칙 기반 Dispatcher + 안전 래퍼 — 워커가 실패해도 END 까지 가고 `run.json` 에 경로가 남는다
 2. **보고서 핵심 (4분)** — SUMMARY 의 엇갈림 2개를 읽는다. 같은 사실(KIVI 2bit 정확도 손실 / InfiniGen CPU 오프로딩 전제)을 시장·도메인 관점이 다르게 읽는 지점. 우열 판정은 없다 — 5장의 "판단에 필요한 추가 확인 항목"으로 끝난다
