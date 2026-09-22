@@ -2,7 +2,7 @@
 
 본 프로젝트는 KV cache 최적화 기술을 SW(KIVI)·HW(InfiniGen) 두 진영에서 하나씩 선정하여,
 **스마트폰 온디바이스 LLM** 도메인 안에서 기술 성숙도·시장·이해관계자·도메인 관점으로
-비교 평가하는 Agentic RAG 를 개발하는 프로젝트임. 우열을 판정하지 않고, 관점에 따라 평가가 어떻게 엇갈리는지를 드러낸다.
+비교 평가하는 Agentic RAG 다. 우열을 판정하지 않고, 관점에 따라 평가가 어떻게 엇갈리는지를 드러낸다.
 
 > SKALA 판교 10반 · 박유진 · 황재원 · 민영은 · 심준용
 > 설계서: [docs/설계서.md](docs/설계서.md) · 협업 규칙: [CONTRIBUTING.md](CONTRIBUTING.md) · 분담: [docs/ROLES.md](docs/ROLES.md)
@@ -11,6 +11,7 @@
 - Objective : 하나의 도메인(스마트폰 온디바이스 LLM)에서 두 기술을 4가지 관점으로 비교 평가
 - Method : Multi-Agent — Branching(fan-out/fan-in) + Loop, 규칙 기반 Dispatcher + Agentic RAG
 - Tools : LangGraph, Chroma, BGE-M3, Tavily, LangSmith, RAGAS
+- Frame : 판정은 배포 제약(재학습 불필요 · 전용 HW 불필요)으로, 해석은 **Recall · Latency · Memory 3축**으로 — 하나를 얻으면 하나를 내준다(KIVI 는 Recall 을, InfiniGen 은 Latency 를). 온디바이스는 Memory 가 절대 제약이라 "무엇을 포기했고 그 포기가 감당 가능한가"를 본다 (설계서 0.3 · 4.4)
 
 ## Selected Technologies
 - SW : **KIVI** (ICML 2024) — 사후·무보정 2bit KV 양자화. 재학습 없이 배포된 모델에 즉시 적용, 피크 메모리 2.6× 감소. 정확도 trade-off 가 관점 대조 재료 (설계서 1.3)
@@ -22,14 +23,14 @@
 - 한국어 질의 → 영어 논문 cross-lingual 검색 — **이중 질의 하이브리드**: dense(BGE-M3) 는 한국어 원 질의, BM25 는 영어 번역 질의, RRF 0.5/0.5, k=4
 - 관련성 체크 → 질문 재작성 1회 → 실패 시 "논문에 근거 없음" 기록 (재작성 전/후 로그)
 - 시장·이해관계자는 Tavily 웹검색, 도메인은 RAG + 웹 (HW 우호 반례 필수 수집)
-- 확증 편향 방지 전략 : 사전 가설 명시 · 기술별 독립 호출 · 사실 단위 질의 · 정확도 임계값 없음 · 출처 태그 강제 `[논문]/[웹]/[추론]` · 반대 근거 ≥2 강제(≤2회 재검색) · 중립성 검증 루프(≤2회) — 설계서 5.5
+- 확증 편향 방지 장치 8개 : ① 사전 가설 명시 ② 기술별 독립 호출 ③ 사실 단위 질의 ④ 정확도 임계값 없음 ⑤ 관련성 실패 → "근거 없음" 기록 ⑥ 출처 태그 강제 `[논문]/[웹]/[추론]` — 무태그 문장은 `[추론]` 으로 기록 ⑦ 반대 근거 ≥2 강제(≤2회 재검색) ⑧ 중립성 검증 루프(≤2회) — 설계서 5.5
 - 보고서 REFERENCE 는 실제 인용된 `citations` 에서만 자동 생성
 
 ## Tech Stack
 - Framework : LangGraph 1.x (Python 3.11, uv)
 - LLM/Generator : gpt-4.1-mini
-- LLM/Judge : gpt-4.1-mini (temperature 0, Generator 와 별도 인스턴스) · 경량 변환 gpt-4.1-nano
-- Retrieval : Chroma(dense) + BM25(sparse, 영어 번역 질의) RRF 0.5/0.5, k=4 — **Hit Rate@4 0.80, MRR@4 0.52** (20문항; dense 단독 0.55/0.40, 설계 초기값 M3-sparse 하이브리드 0.45 → 실측으로 BM25 확정: [experiments/sparse_compare](experiments/sparse_compare/README.md))
+- LLM/Judge : gpt-4.1-mini (temperature 0, Generator 와 별도 인스턴스). 설계서 3.6 의 "판단 없는 변환 = nano" 는 **미사용** — 유일한 변환 단계인 영어 번역 질의가 검색 성패를 가르므로(nano 0.75 / mini 0.80) mini 로 상향 (#27)
+- Retrieval : Chroma(dense) + BM25(sparse, 영어 번역 질의) RRF 0.5/0.5, k=4 — **Hit Rate@4 0.80, MRR@4 0.52** (20문항; dense 단독 0.55/0.40, 설계 초기값 M3-sparse 하이브리드 0.45 → 실측으로 BM25 확정: [experiments/sparse_compare](experiments/sparse_compare/README.md)). **Reranker 없음** — k=4 에서 Hit@4 0.80 을 달성해 재정렬 없이 충분하다고 판단, 대신 Generator 등급을 nano 가 아닌 mini 로 둬 컨텍스트 활용력을 확보 (설계서 3.4)
 - Embedding : `BAAI/bge-m3` (오픈소스, 로컬) — 후보 4개 대조군 실측, 한국어 질의·max_seq 8192 요건으로 선정 (설계서 3.5)
 - Generation eval : RAGAS **Faithfulness 0.936 · ResponseRelevancy 0.838 · LLMContextPrecisionWithoutReference 0.912** (20문항, 근거 없음 0)
 - Observability : LangSmith 프로젝트 `kv-cache-eval`
@@ -53,7 +54,7 @@
 설계 그림(위)과 `python -m graph.build` 가 그린 컴파일 결과([graph_compiled.png](docs/images/graph_compiled.png))가 같다 — 워커 6개가 전부 `dispatcher` 로 수렴하고, 조건부 엣지가 7갈래(+END)로 나간다.
 
 인덱싱 → ① 기술 조사 → ② 평가 3개 병렬(fan-out, 분리 키) → ③ 종합 + 중립성 Judge → ④ 보고서.
-Loop: 관련성 재작성 ≤1(RAG 노드 내부) · 반대 근거 부족 ≤2 · 중립성 반려 ≤2. `llm_calls > 150` 이면 재호출 중단 (설계 100 → #29 로 상향).
+Loop: 관련성 재작성 ≤1(RAG 노드 내부) · 반대 근거 부족 ≤2 · 중립성 반려 ≤2. `llm_calls > 150` 이면 재호출만 중단하고 종합·보고서는 진행 (설계 100 → #29). 워커 예외는 `graph/safe.py` 가 자기 키의 실패 기록으로 바꿔 형제 워커 결과를 지키고 END 까지 간다.
 
 RAG 파이프라인: [전처리](docs/images/pipeline_pre.png) · [검색·관련성](docs/images/pipeline_ret.png) · [생성·사실성](docs/images/pipeline_gen.png)
 
@@ -104,7 +105,7 @@ uv run pytest                    # 단위 테스트
 | 실행 | `uv run python app.py --skip-index --pdf-name "RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf"` (main `ea27e89`) |
 | 경로 | `tech_research → market \| stakeholder \| domain → synthesis → report → END` — 설계서 5.3 규칙표 순서 그대로 |
 | LLM 호출 | **102회** (상한 150 — 설계 100 에서 #29 로 상향) · 재시도 `{} (반대 근거·중립성 모두 1회에 충족)` |
-| 소요 | 186초 (BGE-M3 로드 포함, 인덱스 재사용) |
+| 소요 · 비용 | 186초 (BGE-M3 로드 포함, 인덱스 재사용) · 약 **$0.15/실행** — mini 102회, 호출당 입력 2K · 출력 0.5K 토큰 가정(설계서 3.6 계산식). 임베딩은 로컬이라 0 |
 | 검색 | 20회 중 관련 16 · 근거 없음 4 · 재작성 9 |
 | 판정 | 도메인 KIVI **적합** / InfiniGen **조건부** · TRL 4 / 3 · 종합 엇갈림 4 · 일치 3 · 중립성 `pass` |
 | 보고서 | `[추론]` 비율 5% (7/145) · REFERENCE 11건(논문 + 웹, 인용된 것만) · [report.md](outputs/report/report.md) · [PDF](outputs/report/RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf) |
@@ -118,10 +119,10 @@ uv run pytest                    # 단위 테스트
 3. **Lessons Learned (3분)** — 아래 7개 중 형제 예외 · validator 엄격성 · PR 베이스 실수 3개
 
 ## Lessons Learned
-<!-- 설계와 달라진 것 · 실측이 가설을 뒤집은 것 · 다음에 다르게 할 것 (2026-09-22 통합 실행 6회 기준) -->
+<!-- 설계와 달라진 것 · 실측이 가설을 뒤집은 것 · 다음에 다르게 할 것 (2026-09-22 통합 실행 7회 기준) -->
 
 - **검색**: 설계서 3.4 의 sparse 초기값(BGE-M3 learned sparse)은 실측에서 뒤집혔다 — 한국어 질의에 sparse 를 섞으면 dense 단독보다 나빠지고(0.55→0.45), 해법은 sparse 모델 교체가 아니라 **질의 언어 분리**(dense ← 한국어, BM25 ← 영어 번역)였다. 리더보드가 아니라 우리 질의로 재야 보이는 것 ([실측](experiments/sparse_compare/README.md))
-- **호출 상한**: 설계서 5.0 의 100회는 번역 질의 추가(ask 3→4회)로 fan-out 직후 ~95 에 닿아 재시도 루프가 돌 여유가 없었다 → **150** (#29). 전체 실행 실측 102회
+- **호출 상한**: 설계서 5.1 종료 조건의 100회는 번역 질의 추가(ask 3→4회)로 fan-out 직후 ~95 에 닿아 재시도 루프가 돌 여유가 없었다 → **150** (#29). 전체 실행 실측 102회
 - **워커 예외는 형제를 지운다**: LangGraph 병렬 fan-out 에서 워커 하나의 예외가 같은 슈퍼스텝의 다른 워커 결과까지 State 에서 사라지게 했다(통합 1·2회차). 워커 안의 `try/except` 만으로는 부족해 **그래프 층 안전 래퍼**(`graph/safe.py`)로 실패를 "자기 키의 실패 기록"으로 바꿨다 — 미구현 워커가 3개여도 END 까지 가서 PDF 가 나왔다(3회차)
 - **validator 가 너무 엄격하면 근거가 있어도 버린다**: 출처 태그 검증이 `[논문 p.N]` 한 쪽만 허용해 `[논문 p.2, p.9]` 같은 실출력을 거부 → 도메인·종합 워커가 통째로 실패(5회차). 형식이 아니라 **태그 종류만** 검사하도록 완화 (#40). 장치 6(출처 태그 강제)은 유지
 - **한계점 수치는 워커 출력 형식에 묶인다**: `[추론]` 비율이 처음엔 100%(1/1)로 나왔다 — 워커가 태그를 문장이 아니라 `evidence[].tag` 에 두기 때문. 집계를 두 형식 모두로 바꾸자 5% (7/145). "측정 가능한 한계점"은 스키마를 같이 설계해야 나온다

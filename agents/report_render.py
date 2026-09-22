@@ -28,23 +28,102 @@ CHAPTERS = (           # (key, 제목) — 이 순서가 목차다. SUMMARY 맨 
 
 # ---------- REFERENCE ----------
 
+ARXIV_RE = re.compile(r"arxiv\.org/(?:abs|html|pdf)/(\d{4}\.\d{4,5})")
+
+
+def arxiv_id_from_url(url: str) -> str | None:
+    """https://arxiv.org/abs/2406.19707 · /html/2402.02750v2 · /pdf/2604.05012 → 버전 뗀 arXiv id."""
+    m = ARXIV_RE.search(url or "")
+    return m.group(1) if m else None
+
+
+def format_authors(names: list[str], max_names: int = 3) -> str:
+    """['Keivan Alizadeh', 'Iman Mirzadeh'] → 'Alizadeh, K., Mirzadeh, I.' — 설계서 6장 예시 표기. 4명 이상은 et al."""
+    out = []
+    for n in names[:max_names]:
+        parts = n.strip().split()
+        if not parts:
+            continue
+        last, initials = parts[-1], "".join(p[0] + "." for p in parts[:-1])
+        out.append(f"{last}, {initials}" if initials else last)
+    s = ", ".join(out)
+    return s + " et al." if len(names) > max_names else s
+
+
+def _selected_papers(selected: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """config/selection.yaml 의 sw/hw → {arxiv id: 메타}. 선정 논문 2편은 저자·학회가 여기 있다."""
+    out: dict[str, dict[str, Any]] = {}
+    for side in ("sw", "hw"):
+        p = selected.get(side) or {}
+        if p.get("arxiv"):
+            out[str(p["arxiv"])] = p
+    return out
+
+
+def normalize_citations(citations: list[dict[str, Any]], selected: dict[str, Any] | None = None,
+                        meta: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """웹검색이 논문 페이지(arxiv.org)를 긁어 온 `웹` citation 을 `논문` citation 으로 바꾸고 같은 논문을 하나로 합친다.
+
+    - 선정 논문 2편(selection.yaml)이면 그 저자·학회를 쓴다
+    - 그 외 arXiv id 는 meta(arXiv API 캐시: authors · published · title)가 있으면 저자·연도를 채우고 학회는 *arXiv*
+    - meta 도 없으면 제목·id 만으로 논문 항목을 만든다 (저자 미확인)
+    같은 arXiv id 가 여러 번 나오면 학회 정보가 있는 쪽 하나만 남긴다.
+    """
+    sel = _selected_papers(selected or {})
+    meta = meta or {}
+    by_id: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    others: list[dict[str, Any]] = []
+    for ref in citations:
+        aid = None
+        if ref.get("type") == "논문":
+            aid = _norm_id(str(ref.get("id_or_url") or ""))
+            aid = aid if re.fullmatch(r"\d{4}\.\d{4,5}", aid) else None
+        elif ref.get("type") == "웹":
+            aid = arxiv_id_from_url(str(ref.get("id_or_url") or ""))
+        if not aid:
+            others.append(ref)
+            continue
+        cand = dict(ref)
+        if cand.get("type") == "웹":                                 # 웹 → 논문 승격
+            p = sel.get(aid)
+            m = meta.get(aid) or {}
+            cand = {
+                "type": "논문",
+                "authors": (p or {}).get("authors") or (format_authors(m["authors"]) if m.get("authors") else ""),
+                "year": (str((p or {}).get("year") or "") or (m.get("published") or "")[:4] or ""),
+                "title": (p or {}).get("paper") or m.get("title") or ref.get("title") or "",
+                "venue": (p or {}).get("venue") or "arXiv",
+                "id_or_url": f"arXiv:{aid}",
+                "accessed": ref.get("accessed", ""),
+            }
+        if aid not in by_id:
+            by_id[aid] = cand
+            order.append(aid)
+        else:                                                      # 더 완전한 쪽을 남긴다
+            cur = by_id[aid]
+            score = lambda r: (r.get("venue", "arXiv") != "arXiv", bool(r.get("authors")), bool(r.get("year")))  # noqa: E731
+            if score(cand) > score(cur):
+                by_id[aid] = cand
+    return [by_id[a] for a in order] + others
+
 def _norm_id(id_or_url: str) -> str:
     return id_or_url.replace("arXiv:", "").strip()
 
 
-def is_cited(ref: dict[str, Any], body: str) -> bool:
+def is_cited(ref: dict[str, Any], body: str, corpus_ids: set[str] | None = None) -> bool:
     """본문에서 실제로 인용됐는가 (설계서 6장 — 미인용 자료는 제외).
 
-    논문: arXiv id 또는 제목이 본문에 있거나, 본문에 `[논문 p.N]` 태그가 하나라도 있으면 인용으로 본다
-          (선정 논문 2편이 RAG 코퍼스라 `[논문]` 태그는 이 둘을 가리킨다).
-    웹·특허: URL/번호 또는 제목이 본문에 있어야 한다.
+    - arXiv id · URL · 제목이 본문에 있으면 인용
+    - RAG 코퍼스 논문(corpus_ids = 선정 2편)은 본문에 `[논문 p.N]`/`[p.N]` 태그가 하나라도 있으면 인용으로 본다 —
+      워커가 `[논문 p.7]` 처럼 id 없이 태그를 달기 때문. 풀 밖 논문(웹검색으로 긁어 온 arXiv)에는 이 규칙을 쓰지 않는다
     """
     ident = _norm_id(ref["id_or_url"])
     if ident and ident in body:
         return True
     if ref["title"] and ref["title"] in body:
         return True
-    if ref["type"] == "논문" and ("[논문" in body or re.search(r"\[p\.\d", body)):
+    if ref["type"] == "논문" and ident in (corpus_ids or set()) and ("[논문" in body or re.search(r"\[p\.\d", body)):
         return True
     return False
 
@@ -55,20 +134,41 @@ def format_ref(ref: dict[str, Any]) -> str:
     if t == "논문":
         # 저자(YYYY). 논문제목. *학술지/학회명*, 권(호), 페이지.
         venue = f" *{ref['venue']}*." if ref.get("venue") else ""
-        return f"{ref['authors']}({ref['year']}). {ref['title']}.{venue} {ref['id_or_url']}.".replace("..", ".")
+        authors = ref.get("authors") or "(저자 미확인)"
+        year = ref.get("year") or "연도 미확인"
+        return f"{authors}({year}). {ref['title']}.{venue} {ref['id_or_url']}.".replace("..", ".")
     if t == "특허":
         # 출원인(YYYY-MM). *특허명*, 특허번호/공개번호, URL
         return f"{ref['authors']}({ref['year']}). *{ref['title']}*, {ref['id_or_url']}."
     # 기타(웹): 기관명 또는 작성자(YYYY-MM-DD). *제목*. 사이트명, URL
-    return f"{ref['authors']}({ref.get('accessed') or ref['year']}). *{ref['title']}*. {ref['venue']}, {ref['id_or_url']}"
+    # Tavily 는 저자·게시일을 주지 않는 경우가 많다 → 저자 미상이면 기관명(GitHub 소유자 / 사이트)으로, 날짜는 게시 연도가 있으면 연도,
+    # 없으면 "게시일 미상" 을 적고 접근일은 "접근" 을 붙여 게시일로 오해하지 않게 한다 (설계서 6장 스키마에 게시일 필드가 없음 — 한계점 5 기록)
+    author = _web_author(ref)
+    year = str(ref.get("year") or "")
+    when = year if year and "미상" not in year else "게시일 미상"
+    accessed = ref.get("accessed") or ""
+    date = f"{when} · {accessed} 접근" if accessed else when
+    return f"{author}({date}). *{ref['title']}*. {ref['venue']}, {ref['id_or_url']}"
 
 
-def render_reference(citations: list[dict[str, Any]], body: str) -> str:
+def _web_author(ref: dict[str, Any]) -> str:
+    author = str(ref.get("authors") or "").strip()
+    if author and "미상" not in author:
+        return author
+    url = str(ref.get("id_or_url") or "")
+    m = re.match(r"https?://(?:www\.)?github\.com/([^/]+)/", url)
+    if m:
+        return m.group(1)                          # GitHub 은 소유자를 작성자로 (설계서 예시 jy-yuan)
+    venue = str(ref.get("venue") or "")
+    return venue.removeprefix("www.") or "작성자 미상"
+
+
+def render_reference(citations: list[dict[str, Any]], body: str, corpus_ids: set[str] | None = None) -> str:
     seen: set[str] = set()
     lines: list[str] = []
     for ref in citations:
         key = _norm_id(ref["id_or_url"]) or ref["title"]
-        if key in seen or not is_cited(ref, body):
+        if key in seen or not is_cited(ref, body, corpus_ids):
             continue
         seen.add(key)
         lines.append(f"- {format_ref(ref)}")
@@ -232,7 +332,7 @@ def render_limitations(state: dict[str, Any], stats: dict[str, Any] | None = Non
         "2. **TRL 기준 시점** — arXiv v1 과 학회 게재·가이드 표기 시점이 논문마다 다르다(KIVI: v1 2024-02 / ICML 2024-07, InfiniGen: v1 2024-06 / OSDI 2024-07). 기준 시점에 따라 추정이 달라진다 — 발표 시점과 채택 간 시차의 구체 사례다.",
         "3. **사전 가설과 확증편향 방지 조치** — 사전 가설 *\"온디바이스에서는 SW 압축이 더 적합할 것\"* 을 명시하고 장치 8개(기술별 독립 호출 · 사실 단위 질의 · 정확도 임계값 없음 · 근거 없음 기록 · 출처 태그 강제 · 반대 근거 ≥2 · 중립성 검증 루프)를 적용했다. 판정 기준(재학습 불필요 · 전용 HW 불필요)은 배포 용이성에 가중을 두므로 구조적으로 SW 접근에 유리하다 — 도메인의 실제 제약을 반영한 것이지만 기준 선택 자체가 결과에 영향을 준다. Memory · Recall · Latency 3축은 판정이 아닌 해석에만 썼다." + viol_line,
         f"4. **`[추론]` 태그 비율** — 판단 문장 {st['tagged_total']}건 중 논문·웹 근거 없이 추론에만 의존한 문장 {ratio}.",
-        f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr}{mode} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다.",
+        f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr}{mode} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다. 웹 출처는 Tavily 가 저자·게시일을 주지 않는 경우가 많아 REFERENCE 에 기관명(사이트)과 접근일로 대체했다 — 게시일이 필요한 항목은 사람이 확인해야 한다.",
         f"6. **질의 재작성 효과** — {rewrite}. 효과가 없으면 재작성 단계 제거를 검토한다.",
     ])
 
