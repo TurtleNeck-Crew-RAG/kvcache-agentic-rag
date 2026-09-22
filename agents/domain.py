@@ -33,7 +33,9 @@ SOURCE_TAG = re.compile(r"\[(?:논문|웹|추론|p\.\d)[^\]]*\]")   # [논문 p.
 
 def _require_source_tag(value: str) -> str:
     if "근거 없음" not in value and not SOURCE_TAG.search(value):   # "…(논문에 근거 없음)." 도 근거 없음 기록으로 인정
-        raise ValueError("판단 문장에 출처 태그가 필요합니다")
+        # 태그 없는 판단 문장 = 근거 없는 추론으로 기록한다 (장치 6). 예외로 워커 전체를 버리면 태그가 있는 나머지 문장까지
+        # 사라진다 — 6회차: TRL basis 2문장 때문에 종합 전체가 실패. [추론] 은 한계점 4 의 비율에 그대로 잡힌다.
+        return value.rstrip() + " [추론]"
     return value
 
 
