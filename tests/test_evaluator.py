@@ -501,3 +501,74 @@ def test_rule_targets_put_cells_before_report():
     result = evaluator.evaluate(markdown, state)
 
     assert result["targets"] == ["market:KIVI", "report"]
+
+
+# ── #117: groundedness 실패는 고칠 수 있는 곳으로 — 4장은 셀 워커, 나머지 장은 report ──────────
+
+UNTAGGED = "근거 없이 단정한 문장이다. 또 다른 단정 문장이다. 세 번째 단정 문장이다."
+
+
+def test_untagged_rendered_cell_sentences_target_that_worker():
+    markdown = _report().replace(f"시장 근거가 있다 [웹 {WEB_REFS[0]}].", f"{UNTAGGED} 시장 근거가 있다 [웹 {WEB_REFS[0]}].")
+
+    result = evaluator.evaluate(markdown, _state())
+
+    assert not result["items"]["groundedness"]["passed"]
+    assert result["targets"] == ["market:KIVI"]                  # 보고서를 다시 써도 4장은 안 바뀐다
+    assert "market:KIVI 3건" in result["items"]["groundedness"]["reason"]
+
+
+def test_report_chapter_problems_target_report_and_cells_come_first():
+    markdown = (
+        _report()
+        .replace("KIVI와 InfiniGen을 네 관점에서 비교했다 [논문 p.1].", UNTAGGED)
+        .replace(f"온디바이스 조건이 있다 [웹 {WEB_REFS[5]}].", f"{UNTAGGED} 조건 [웹 {WEB_REFS[5]}].")
+    )
+
+    result = evaluator.evaluate(markdown, _state())
+
+    assert result["targets"] == ["domain:InfiniGen", "report"]
+
+
+def test_chapter3_overview_is_rewritten_by_report_not_tech_research():
+    markdown = _report().replace("KIVI는 KV cache를 양자화한다 [논문 p.1].", UNTAGGED + " 양자화한다 [추론].")
+
+    result = evaluator.evaluate(markdown, _state())
+
+    assert not result["items"]["groundedness"]["passed"]
+    assert result["targets"] == ["report"]
+
+
+def test_perspective_4_1_and_inference_only_map_to_cells():
+    markdown = (
+        _report()
+        .replace("공개 구현이 있다 [논문 p.2].", "공개 구현이 있을 것이다 [추론]. 재현이 쉬울 것이다 [추론].")
+        .replace(f"찬반 근거가 있다 [웹 {WEB_REFS[3]}].", "찬반이 갈릴 것이다 [추론]. 반대가 많을 것이다 [추론].")
+    )
+
+    targets = evaluator.evaluate(markdown, _state())["targets"]
+
+    assert set(targets) == {"tech_research:KIVI", "stakeholder:InfiniGen"}
+
+
+def test_labelled_absence_record_is_not_a_claim():
+    markdown = _report().replace(
+        f"- **KIVI** — 중\n    - 시장 근거가 있다 [웹 {WEB_REFS[0]}].",
+        f"- **KIVI** — 중\n    - 채택: 근거 없음\n    - 시장 근거가 있다 [웹 {WEB_REFS[0]}].",
+    )
+
+    units = evaluator.claim_units(markdown)
+
+    assert "채택: 근거 없음" not in units
+    assert evaluator.groundedness(markdown)["passed"]
+
+
+def test_judge_overstated_rendered_claim_targets_cell(tmp_path, fake_judge):
+    markdown = _report()
+    cid = _claim_id(markdown, f"시장 근거가 있다 [웹 {WEB_REFS[0]}]")
+    fake_judge(claims={cid: ("overstated", "채택 범위를 근거의 실험 조건으로 한정한다")})
+
+    result = _run(tmp_path, markdown)["eval_result"]
+
+    assert result["targets"] == ["market:KIVI"]
+    assert "근거보다 강한 주장" in result["feedback"] and "(→ market:KIVI)" in result["feedback"]
