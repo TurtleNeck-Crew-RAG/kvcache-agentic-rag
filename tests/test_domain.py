@@ -14,6 +14,13 @@ langchain_tavily.TavilySearch = Mock  # type: ignore[attr-defined]
 sys.modules.setdefault("langchain_tavily", langchain_tavily)
 
 import agents.domain as domain  # noqa: E402
+import graph.observe as ob  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_outputs(monkeypatch, tmp_path):
+    """run() 이 검색 로그를 outputs/ 에 쓰지 않게 — 임시 폴더로."""
+    monkeypatch.setattr(ob, "OUT", tmp_path)
 
 
 def _rag_answer(tech: str, question: str, node: str) -> dict:
@@ -106,6 +113,7 @@ def test_run_extracts_five_facts_per_tech_and_returns_state_contract(monkeypatch
     monkeypatch.setattr(domain, "TavilySearch", FakeSearch)
 
     state = {
+        "trace_id": "t-domain",
         "domain": {
             "constraints": {
                 "memory": {"ram_gb": [8, 16]},
@@ -136,6 +144,10 @@ def test_run_extracts_five_facts_per_tech_and_returns_state_contract(monkeypatch
     assert set(result) == {"domain_eval", "citations", "retrieval_log", "llm_calls"}
     assert set(result["domain_eval"]) == {"KIVI", "InfiniGen"}
     assert len(result["retrieval_log"]) == 10
+    logged = ob.read_jsonl(ob.RETRIEVAL, "t-domain")          # 정본은 파일 — State 반환은 이행 중(#62)
+    assert len(logged) == 10 and {r["node"] for r in logged} == {"domain"}
+    assert [r["query_before"] for r in logged] == [e["query_before"] for e in result["retrieval_log"]]
+    assert ob.retrieval_entries({"trace_id": "t-domain"}) == logged
     assert result["llm_calls"] == 22
     assert len(result["citations"]) == 3
     assert result["citations"][0]["authors"] == "Liu, Z., Yuan, J., Jin, H. et al."
