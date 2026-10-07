@@ -124,3 +124,13 @@ def test_domain_allows_paper_majority_but_needs_a_second_source():
     paper = ev("2406.19707", 4, tag="논문")
     assert su.rule_check("domain", "InfiniGen", eval_(paper + ev("https://a.com", 1), negatives=1), {})["rule"] == "pass"   # 80%
     assert su.rule_check("domain", "KIVI", eval_(paper, negatives=1), {})["gap"] == "source_bias"                        # 웹 반례 없음
+
+
+def test_inference_tagged_evidence_is_not_counted():
+    # 웹 1건 + [추론] 2건 — 건수로는 3 이지만 출처 있는 근거는 1건
+    padded = eval_(ev("https://a.com", 1) + ev("", 2, tag="추론"))
+    v = su.rule_check("market", "KIVI", padded, {})
+    assert v["gap"] == "evidence" and "1건" in v["reason"]
+    ts = {"overview": "o", "mechanism": "m", "numbers": ["n"], "limitations": ["l"], "apply_conditions": [],
+          "evidence": ev("2402.02750", 2, tag="논문") + [{"claim": "Faithfulness 미통과", "tag": "추론", "ref": "judge", "page": None}]}
+    assert su.rule_check("tech_research", "KIVI", ts, {})["gap"] == "evidence"

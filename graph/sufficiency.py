@@ -30,7 +30,8 @@ PERSPECTIVE = {"tech_research": "기술 성숙도", "market": "시장성",
                "stakeholder": "이해관계자", "domain": "도메인 적용 (스마트폰 온디바이스)"}
 
 # ── 결정론 층 기준 — README State Schema · 확증편향 방지에 그대로 적는다 ──
-MIN_EVIDENCE = 3                                                  # 셀당 근거 문장
+MIN_EVIDENCE = 3                                                  # 셀당 근거 문장 — 출처가 있는 [논문] · [웹] 만 센다
+GROUNDED_TAGS = ("논문", "웹")                                      # [추론] · Faithfulness 미통과 메모는 근거가 아니다
 MIN_NEGATIVES = {"market": 1, "stakeholder": 2, "domain": 1}      # 반대 근거 (이해관계자는 RAG 때부터 ≥2)
 MIN_SOURCES = 2                                                   # 서로 다른 출처 수 (웹 관점)
 MAX_SOURCE_SHARE = {"market": 0.6, "stakeholder": 0.6,           # 한 출처가 근거의 이 비율 초과면 편중
@@ -110,7 +111,7 @@ def rule_check(worker: str, tech: str, payload: dict | None, node_status: dict[s
     if payload is None:
         return _fail("missing", hint("evidence"), "미수집")
 
-    evidence = payload.get("evidence") or []
+    evidence = [e for e in payload.get("evidence") or [] if e.get("tag") in GROUNDED_TAGS]
     if worker == "tech_research":
         overview = payload.get("overview", "")
         if overview.startswith(NO_EVIDENCE) or not overview.strip():
