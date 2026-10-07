@@ -44,11 +44,19 @@ def test_mostly_no_evidence_grade_fails_but_partial_passes():
     assert su.rule_check("market", "KIVI", {**GOOD, "grade": "채택: 근거 없음 / 시장 연결: 중 / 생태계: 상"}, {})["rule"] == "pass"
 
 
-def test_negatives_threshold_by_perspective():
+def test_negatives_at_least_two_for_every_perspective():
     one = eval_(GOOD["evidence"], negatives=1)
-    assert su.rule_check("market", "KIVI", one, {})["rule"] == "pass"
-    v = su.rule_check("stakeholder", "KIVI", one, {})
-    assert v["gap"] == "negatives" and "KIVI" in v["hint_query"]
+    for w in ("market", "stakeholder", "domain"):
+        v = su.rule_check(w, "KIVI", one, {})
+        assert v["gap"] == "negatives" and "KIVI" in v["hint_query"]
+
+
+def test_web_source_majority_fails_but_half_passes():
+    half = eval_(ev("https://a.com", 2) + ev("https://b.com", 1) + ev("https://c.com", 1))      # a.com 50%
+    assert su.rule_check("market", "KIVI", half, {})["rule"] == "pass"
+    major = eval_(ev("https://a.com", 3) + ev("https://b.com", 2))                              # a.com 60%
+    v = su.rule_check("stakeholder", "KIVI", major, {})
+    assert v["gap"] == "source_bias" and "과반" in v["reason"]
 
 
 def test_single_source_dominance_fails():
@@ -120,10 +128,11 @@ def test_prompt_renders_with_all_placeholders():
     assert "{" + "tech}" not in text and "KIVI" in text and "시장성" in text
 
 
-def test_domain_allows_paper_majority_but_needs_a_second_source():
+def test_domain_needs_web_counter_example_not_share():
     paper = ev("2406.19707", 4, tag="논문")
-    assert su.rule_check("domain", "InfiniGen", eval_(paper + ev("https://a.com", 1), negatives=1), {})["rule"] == "pass"   # 80%
-    assert su.rule_check("domain", "KIVI", eval_(paper, negatives=1), {})["gap"] == "source_bias"                        # 웹 반례 없음
+    assert su.rule_check("domain", "InfiniGen", eval_(paper + ev("https://a.com", 1)), {})["rule"] == "pass"   # 논문 80% 여도 통과
+    v = su.rule_check("domain", "KIVI", eval_(paper), {})
+    assert v["gap"] == "counter_example" and "반례" in v["hint_query"]
 
 
 def test_inference_tagged_evidence_is_not_counted():
@@ -134,3 +143,10 @@ def test_inference_tagged_evidence_is_not_counted():
     ts = {"overview": "o", "mechanism": "m", "numbers": ["n"], "limitations": ["l"], "apply_conditions": [],
           "evidence": ev("2402.02750", 2, tag="논문") + [{"claim": "Faithfulness 미통과", "tag": "추론", "ref": "judge", "page": None}]}
     assert su.rule_check("tech_research", "KIVI", ts, {})["gap"] == "evidence"
+
+
+def test_failure_marker_in_negatives_is_not_counted():
+    # stakeholder 는 재작업 상한 후 "반대 근거 확보 실패 [추론]" 을 붙인다 (#73) — 이건 반대 근거가 아니다
+    payload = {**GOOD, "negatives": ["진짜 반대 1", "반대 근거 확보 실패 [추론]"]}
+    v = su.rule_check("stakeholder", "KIVI", payload, {})
+    assert v["gap"] == "negatives" and "1건" in v["reason"]

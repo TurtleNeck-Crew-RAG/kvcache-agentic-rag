@@ -32,10 +32,13 @@ PERSPECTIVE = {"tech_research": "기술 성숙도", "market": "시장성",
 # ── 결정론 층 기준 — README State Schema · 확증편향 방지에 그대로 적는다 ──
 MIN_EVIDENCE = 3                                                  # 셀당 근거 문장 — 출처가 있는 [논문] · [웹] 만 센다
 GROUNDED_TAGS = ("논문", "웹")                                      # [추론] · Faithfulness 미통과 메모는 근거가 아니다
-MIN_NEGATIVES = {"market": 1, "stakeholder": 2, "domain": 1}      # 반대 근거 (이해관계자는 RAG 때부터 ≥2)
-MIN_SOURCES = 2                                                   # 서로 다른 출처 수 (웹 관점)
-MAX_SOURCE_SHARE = {"market": 0.6, "stakeholder": 0.6,           # 한 출처가 근거의 이 비율 초과면 편중
-                    "domain": 0.8}                                # 도메인은 논문 사실 추출이 본체 — 웹 반례가 1곳 이상이면 된다
+MIN_NEGATIVES = 2                                                 # 반대 근거 — 전 관점 공통 (RAG 확증편향 방지 장치 7). 질은 Judge 기준 3
+# 출처 기준은 관점의 자료 구조에 따라 둘로 나뉜다
+WEB_PERSPECTIVES = ("market", "stakeholder")                      # 웹 검색만 쓰는 관점
+MIN_SOURCES = 2                                                   #   서로 다른 출처 2곳 이상
+MAX_SOURCE_SHARE = 0.5                                            #   한 출처가 근거의 과반이면 편중
+MIN_WEB_COUNTER = 1                                               # 도메인 = 논문 사실 추출 + 웹 반례 (RAG 설계서 4.4) → 웹 근거 1건 이상.
+                                                                  # 반례인지(지지 근거가 아닌지)는 규칙이 못 본다 — Judge 기준 3
 NO_EVIDENCE = "근거 없음"
 MAX_JUDGE_EVIDENCE = 12                                           # Judge 에 넘길 근거 문장 상한 (컨텍스트 절약)
 
@@ -100,6 +103,8 @@ def _hint(worker: str, tech: str, gap: str) -> str:
         return f"{tech} 한계 단점 비판 {_KW[worker]}"
     if gap == "source_bias":
         return f"{tech} {_KW[worker]} 독립 분석 기사 보고서"
+    if gap == "counter_example":
+        return f"{tech} 스마트폰 온디바이스 한계 반례 메모리 대역폭 전력"
     return f"{tech} {_KW[worker]}"
 
 
@@ -131,14 +136,20 @@ def rule_check(worker: str, tech: str, payload: dict | None, node_status: dict[s
         return _fail("no_evidence", hint("evidence"), f"등급 과반이 근거 없음: {payload.get('grade', '')}")
     if len(evidence) < MIN_EVIDENCE:
         return _fail("evidence", hint("evidence"), f"근거 {len(evidence)}건 < {MIN_EVIDENCE}")
-    neg = len(payload.get("negatives") or [])
-    if neg < MIN_NEGATIVES[worker]:
-        return _fail("negatives", hint("negatives"), f"반대 근거 {neg}건 < {MIN_NEGATIVES[worker]}")
+    # "반대 근거 확보 실패 [추론]" 같은 [추론] 표시는 반대 근거가 아니다 — evidence 의 GROUNDED_TAGS 와 같은 원칙
+    neg = sum(1 for n in payload.get("negatives") or [] if not str(n).rstrip().endswith("[추론]"))
+    if neg < MIN_NEGATIVES:
+        return _fail("negatives", hint("negatives"), f"반대 근거 {neg}건 < {MIN_NEGATIVES}")
     n_src, top, share = _source_bias(evidence)
-    if n_src < MIN_SOURCES:
-        return _fail("source_bias", hint("source_bias"), f"출처 {n_src}곳 < {MIN_SOURCES}")
-    if share > MAX_SOURCE_SHARE[worker]:
-        return _fail("source_bias", hint("source_bias"), f"출처 편중 {top} {share:.0%} > {MAX_SOURCE_SHARE[worker]:.0%}")
+    if worker in WEB_PERSPECTIVES:
+        if n_src < MIN_SOURCES:
+            return _fail("source_bias", hint("source_bias"), f"출처 {n_src}곳 < {MIN_SOURCES}")
+        if share > MAX_SOURCE_SHARE:
+            return _fail("source_bias", hint("source_bias"), f"출처 편중 {top} {share:.0%} — 과반")
+    else:                                                          # domain
+        web = sum(e.get("tag") == "웹" for e in evidence)
+        if web < MIN_WEB_COUNTER:
+            return _fail("counter_example", hint("counter_example"), f"웹 근거 {web}건 < {MIN_WEB_COUNTER} (웹 반례 필요)")
     return {"rule": "pass", "judge": None, "gap": "", "hint_query": "",
             "reason": f"근거 {len(evidence)}건 · 반대 {neg}건 · 출처 {n_src}곳(최다 {share:.0%})"}
 
