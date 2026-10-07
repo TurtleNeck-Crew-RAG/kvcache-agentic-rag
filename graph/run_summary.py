@@ -36,9 +36,13 @@ def summarize(trace_id: str | None = None) -> dict[str, Any]:
     retry = (run.get("retry") if same_run else None) or {}
 
     reworks = Counter()
+    before: dict[str, list[str]] = {}               # 셀 → 재작업 k 회째 직전의 판정 사유 (게이트가 사유에 같이 찍는다)
     for d in decisions:
-        if "재작업" in d.get("reason", "") and "부족 셀" in d.get("reason", ""):
-            reworks[d["reason"].split("부족 셀 ", 1)[1].split()[0]] += 1
+        reason = d.get("reason", "")
+        if "재작업" in reason and "부족 셀" in reason:
+            cell = reason.split("부족 셀 ", 1)[1].split()[0]
+            reworks[cell] += 1
+            before.setdefault(cell, []).append(reason.split(" — ", 1)[1] if " — " in reason else "")
     eval_loops = sum("평가 fail" in d.get("reason", "") and "루프" in d.get("reason", "") for d in decisions)
     unresolved = {c: v for c, v in sufficiency.items()
                   if v.get("rule") == "fail" or v.get("judge") == "insufficient"}
@@ -53,7 +57,25 @@ def summarize(trace_id: str | None = None) -> dict[str, Any]:
         "sufficiency": sufficiency,
         "unresolved": unresolved,
         "eval_result": eval_result,
+        "rework_effect": rework_effect(before, sufficiency),
     }
+
+
+def rework_effect(before: dict[str, list[str]], sufficiency: dict[str, dict]) -> list[dict[str, Any]]:
+    """셀마다 재작업 회차별 판정 변화 — MAX_REWORK 의 한계 효용 근거 (#102).
+
+    states[0] = 1회째 직전, states[k] = k 회째 직후 판정 (마지막은 sufficiency 의 최종 판정).
+    effect: 해소(최종 충분) · 개선(사유가 바뀜) · 변화 없음(같은 사유 반복)
+    """
+    rows = []
+    for cell, reasons in before.items():
+        final = sufficiency.get(cell)
+        ok = bool(final) and final.get("rule") == "pass" and final.get("judge") != "insufficient"
+        states = reasons + ["충분" if ok else (final or {}).get("reason", "(최종 판정 없음)")]
+        last_changed = len(states) >= 2 and states[-1] != states[-2]
+        effect = "해소" if ok else ("개선" if last_changed else "변화 없음")
+        rows.append({"cell": cell, "states": states, "effect": effect, "reworks": len(reasons)})
+    return rows
 
 
 def to_markdown(s: dict[str, Any]) -> str:
@@ -80,6 +102,17 @@ def to_markdown(s: dict[str, Any]) -> str:
                        f"{s['reworks'].get(cell, 0)} | {v.get('reason', '').replace('|', '/')[:120]} |")
         if s["unresolved"]:
             out += ["", "**끝까지 부족한 셀** (보고서 한계점 대상): " + ", ".join(sorted(s["unresolved"]))]
+
+    if s.get("rework_effect"):
+        out += ["", "## 재작업 회차별 판정 변화 (MAX_REWORK 한계 효용)", "",
+                "| 셀 | 재작업 | 1회 전 | 1회 후 | 2회 후 | 마지막 재작업 효과 |", "|---|---|---|---|---|---|"]
+        for r in s["rework_effect"]:
+            st = [x.replace("|", "/")[:60] for x in r["states"]] + ["—", "—"]
+            out.append(f"| {r['cell']} | {r['reworks']} | {st[0]} | {st[1]} | {st[2] if r['reworks'] >= 2 else '—'} | {r['effect']} |")
+        n2 = [r for r in s["rework_effect"] if r["reworks"] >= 2]
+        if n2:
+            useful = sum(r["effect"] != "변화 없음" for r in n2)
+            out += ["", f"2회째 재작업이 판정을 바꾼 셀: **{useful}/{len(n2)}** — 거의 없으면 MAX_REWORK 1 검토"]
 
     ev = s["eval_result"]
     if ev:
