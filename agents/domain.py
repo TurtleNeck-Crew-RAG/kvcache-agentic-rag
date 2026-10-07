@@ -8,8 +8,7 @@
 - 그 밖에는 기존 평가 + hint_query 보강 검색(웹 반례 · 출처 gap 은 웹, 나머지는 논문 RAG)으로 DomainEval 재생성
 - 반환 domain_eval 에는 요청 기술만 — merge_by_tech 리듀서가 다른 기술 결과를 지킨다
 
-출력 키: domain_eval · citations · retrieval_log · llm_calls
-검색 로그 정본은 outputs/retrieval_log.jsonl (graph/observe) — State retrieval_log 반환은 이행 중(#62)
+출력 키: domain_eval · citations · llm_calls — 검색 로그는 outputs/retrieval_log.jsonl, 웹 검색 횟수는 web_calls.jsonl (graph/observe)
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ from langchain_tavily import TavilySearch
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from agents._common import TECHS, llm, load_prompt
-from graph.observe import log_retrieval
+from graph.observe import log_retrieval, log_web
 from graph.state import Evidence, GraphState, Ref, RetrievalEntry
 from rag.rag_node import ask
 
@@ -132,6 +131,7 @@ def _search_counter_examples(
     search: TavilySearch,
     counter_examples: list[str],
     extra_queries: tuple[str, ...] = (),
+    trace_id: str = "",
 ) -> list[dict[str, Any]]:
     collected: list[dict[str, Any]] = []
     jobs = [
@@ -139,8 +139,14 @@ def _search_counter_examples(
         for name in counter_examples
     ] + [("rework", query) for query in extra_queries]
     for name, query in jobs:
-        raw = search.invoke({"query": query})
-        for item in _normalise_search_results(raw):
+        try:
+            raw = search.invoke({"query": query})
+        except Exception:
+            log_web(trace_id, "domain", query, 0)                 # 실패해도 크레딧은 쓰였다 (#102)
+            raise
+        items = _normalise_search_results(raw)
+        log_web(trace_id, "domain", query, len(items))
+        for item in items:
             collected.append(
                 {
                     "counter_example": name,
@@ -288,6 +294,7 @@ def run(state: GraphState) -> dict:
                     _new_search(),
                     counter_examples if tech == "InfiniGen" else [],
                     (f"{tech} {hint}",),
+                    trace_id=state.get("trace_id", ""),
                 )
         else:
             for question in FACT_QUESTIONS:
@@ -296,6 +303,7 @@ def run(state: GraphState) -> dict:
             if tech == "InfiniGen" or extra:
                 web_evidence = _search_counter_examples(
                     _new_search(), counter_examples if tech == "InfiniGen" else [], extra,
+                    trace_id=state.get("trace_id", ""),
                 )
 
         rework = {"gap": gap, "hint": hint, "previous": previous} if reinforce else None
@@ -322,6 +330,5 @@ def run(state: GraphState) -> dict:
     return {
         "domain_eval": evaluations,
         "citations": citations,
-        "retrieval_log": retrieval_log,
         "llm_calls": llm_calls,
     }

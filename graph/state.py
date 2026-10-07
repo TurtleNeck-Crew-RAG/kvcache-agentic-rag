@@ -70,7 +70,7 @@ class Ref(TypedDict):
 
 
 class RetrievalEntry(TypedDict):
-    """RAG 노드 로그 — A 가 outputs/retrieval_log.jsonl 로 외부화한다 (ROLES.md 2절 A)."""
+    """RAG 노드 로그 한 줄 — State 가 아니라 outputs/retrieval_log.jsonl (graph/observe.log_retrieval, #62)."""
     node: str
     tech: Tech
     query_before: str
@@ -214,7 +214,6 @@ class GraphState(TypedDict, total=False):
     # ── 이행 중 (RAG 과제 키) — 소유자가 옮기면 삭제 ──
     report_md: str | None                        # B report → report_uri 로 이행 후 삭제
     neutrality: Neutrality                       # C 중립성 Judge → evaluator 통합 여부 결정 후 정리
-    retrieval_log: Annotated[list[RetrievalEntry], operator.add]   # A → outputs/retrieval_log.jsonl 로 이행 후 삭제
 
 
 def init_state(domain: dict[str, Any], selected: dict[str, Any], *,
@@ -247,5 +246,4 @@ def init_state(domain: dict[str, Any], selected: dict[str, Any], *,
         errors=[],
         last_error=None,
         report_md=None,
-        retrieval_log=[],
     )

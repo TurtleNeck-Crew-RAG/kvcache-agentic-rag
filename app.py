@@ -36,7 +36,7 @@ CHECKPOINT_DB = OUT / "checkpoints.sqlite"
 RUN_TIMEOUT = 1200        # 초 — ⚠️ 잠정. RAG 실행 186초 × 재작업 · 평가 루프 여유. 첫 실제 실행 소요 × 1.5 로 확정
 DUMP_KEYS = ("citations", "synthesis", "trl_estimate", "tech_summary", "market_eval", "stakeholder_eval",
              "domain_eval", "sufficiency", "eval_result", "errors",
-             "retrieval_log", "neutrality")        # 마지막 둘은 이행 중 키 (graph/state.py)
+             "neutrality")                         # 이행 중 키 (graph/state.py)
 
 
 def make_checkpointer():

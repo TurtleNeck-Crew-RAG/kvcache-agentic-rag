@@ -49,13 +49,17 @@ def generator(schema):
     return llm("generator").with_structured_output(schema)
 
 
-def search(queries: list[str]) -> tuple[dict[str, dict], list[str]]:
+def search(queries: list[str], *, node: str = "", trace_id: str = "") -> tuple[dict[str, dict], list[str]]:
+    """질의마다 Tavily 1회. 횟수는 observe.log_web 으로 외부 로그 (#102) — 실패한 질의도 0건으로 남긴다."""
+    from graph.observe import log_web
+
     sources, notes = {}, []
     try:
         client = search_client()
     except Exception as exc:
         return {}, [f"웹 검색 초기화 실패 ({type(exc).__name__})"]
     for query in queries:
+        n_results = 0
         try:
             response = client.search(
                 query=query, search_depth="advanced", max_results=5,
@@ -64,6 +68,7 @@ def search(queries: list[str]) -> tuple[dict[str, dict], list[str]]:
             results = response["results"]
             if not isinstance(results, list):
                 raise ValueError("invalid search results")
+            n_results = len(results)
             for item in results:
                 if not isinstance(item, dict):
                     continue
@@ -85,6 +90,7 @@ def search(queries: list[str]) -> tuple[dict[str, dict], list[str]]:
         except Exception as exc:
             # 예외 메시지에는 요청 헤더/API 키가 들어갈 수 있어 타입만 기록한다.
             notes.append(f"웹 검색 일부 실패 ({type(exc).__name__})")
+        log_web(trace_id, node, query, n_results)
     return sources, list(dict.fromkeys(notes))
 
 

@@ -141,13 +141,13 @@ def test_run_extracts_five_facts_per_tech_and_returns_state_contract(monkeypatch
     }
     result = domain.run(state)
 
-    assert set(result) == {"domain_eval", "citations", "retrieval_log", "llm_calls"}
+    assert set(result) == {"domain_eval", "citations", "llm_calls"}   # retrieval_log 는 State 로 안 보낸다 (#62)
     assert set(result["domain_eval"]) == {"KIVI", "InfiniGen"}
-    assert len(result["retrieval_log"]) == 10
-    logged = ob.read_jsonl(ob.RETRIEVAL, "t-domain")          # 정본은 파일 — State 반환은 이행 중(#62)
+    logged = ob.read_jsonl(ob.RETRIEVAL, "t-domain")          # 검색 로그는 파일로만
     assert len(logged) == 10 and {r["node"] for r in logged} == {"domain"}
-    assert [r["query_before"] for r in logged] == [e["query_before"] for e in result["retrieval_log"]]
     assert ob.retrieval_entries({"trace_id": "t-domain"}) == logged
+    web = ob.read_jsonl(ob.WEB, "t-domain")                   # 웹 검색 횟수 (#102)
+    assert web and {w["node"] for w in web} == {"domain"}
     assert result["llm_calls"] == 22
     assert len(result["citations"]) == 3
     assert result["citations"][0]["authors"] == "Liu, Z., Yuan, J., Jin, H. et al."
@@ -290,7 +290,7 @@ def test_paper_gap_reinforces_only_requested_tech_with_hint(monkeypatch):
     assert len(h.prompts) == 1 and "InfiniGen" not in h.prompts[0]
     assert "## 재작업 요청" in h.prompts[0] and "KIVI 직전 판정 근거" in h.prompts[0]
     assert result["llm_calls"] == 2 + 1
-    assert len(result["retrieval_log"]) == 1
+    assert "retrieval_log" not in result
     claims = {e["claim"] for e in result["domain_eval"]["KIVI"]["evidence"]}
     assert {"paper fact", "earlier fact"} <= claims                      # 기존 근거 유지
     assert set(result["domain_eval"]["KIVI"]["axes"]) == {"recall", "latency", "memory"}
