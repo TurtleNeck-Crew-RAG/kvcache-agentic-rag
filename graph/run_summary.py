@@ -61,18 +61,32 @@ def summarize(trace_id: str | None = None) -> dict[str, Any]:
     }
 
 
+def _verdict_key(reason: str) -> str:
+    """회차 비교용 판정 키 — LLM 문장은 빼고 결정론 부분만.
+
+    게이트 사유가 `gap=<gap> · <사유>` 형식이면 gap 을 쓰고(#102), 아니면 ` · Judge: …` 앞의 규칙 사유만 쓴다.
+    Judge 문장은 같은 문제여도 표현이 바뀌므로, 그걸로 비교하면 "개선" 이 부풀어 MAX_REWORK 근거가 약해진다.
+    """
+    if reason.startswith("gap="):
+        return reason.split(" ", 1)[0]
+    return reason.split(" · Judge:", 1)[0].strip()
+
+
 def rework_effect(before: dict[str, list[str]], sufficiency: dict[str, dict]) -> list[dict[str, Any]]:
     """셀마다 재작업 회차별 판정 변화 — MAX_REWORK 의 한계 효용 근거 (#102).
 
     states[0] = 1회째 직전, states[k] = k 회째 직후 판정 (마지막은 sufficiency 의 최종 판정).
-    effect: 해소(최종 충분) · 개선(사유가 바뀜) · 변화 없음(같은 사유 반복)
+    effect: 해소(최종 충분) · 개선(판정 키가 바뀜) · 변화 없음(같은 판정 키 반복) — 키는 _verdict_key
     """
     rows = []
     for cell, reasons in before.items():
         final = sufficiency.get(cell)
         ok = bool(final) and final.get("rule") == "pass" and final.get("judge") != "insufficient"
-        states = reasons + ["충분" if ok else (final or {}).get("reason", "(최종 판정 없음)")]
-        last_changed = len(states) >= 2 and states[-1] != states[-2]
+        final_reason = (f"gap={final['gap']} · {final.get('reason', '')}" if final and final.get("gap")
+                        else (final or {}).get("reason", "(최종 판정 없음)"))
+        states = reasons + ["충분" if ok else final_reason]
+        keys = [_verdict_key(x) for x in states]
+        last_changed = len(keys) >= 2 and keys[-1] != keys[-2]
         effect = "해소" if ok else ("개선" if last_changed else "변화 없음")
         rows.append({"cell": cell, "states": states, "effect": effect, "reworks": len(reasons)})
     return rows
