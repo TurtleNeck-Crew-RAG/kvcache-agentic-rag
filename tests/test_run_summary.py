@@ -98,3 +98,9 @@ def test_web_calls_counted_per_node(_out):
     s = rs.summarize()
     assert s["web_calls"] == {"market": 2, "domain": 1, "stakeholder": 1} and s["web_empty"] == 1
     assert "웹 검색 (Tavily) | 4회 — domain 1, market 2, stakeholder 1 (결과 0건 1회)" in rs.to_markdown(s)
+
+
+def test_tokens_and_budgets_shown(_out):
+    _write(_out, "run.json", {"trace_id": "T", "llm_calls": 120, "tokens": 345678})
+    md = rs.to_markdown(rs.summarize())
+    assert "| 토큰 | 345678 / TOKEN_BUDGET" in md and "LLM_BUDGET" in md
