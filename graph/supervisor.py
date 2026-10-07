@@ -16,6 +16,7 @@ supervisor(state) 는 판정 결과(sufficiency · eval_result) · 시도 횟수
   5. 평가 pass                                   → END  — 단 node_status 에 failed 가 남아 있으면 end_with_warning
      보고서는 있는데 eval_result 가 없음(evaluator 실패) → end_with_warning — 평가 없이 성공으로 끝내지 않는다 (#120)
   6. 평가 fail (eval_attempts < MAX_EVAL, 예산 안)  → targets 중 첫 실행 가능한 곳 — 재조사면 synthesis · 보고서를 비워 다시 흐르게
+     실행 가능한 target 이 없으면(셀은 재작업 소진, report 는 target 아님) → end_with_warning
   7. 평가 fail 소진                              → end_with_warning
 
 예산(#102) — 재작업 · 평가 루프는 "마무리(종합 · 보고서 · 평가) 예약분을 남기고도 예산 안"일 때만.
@@ -149,7 +150,8 @@ def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
             req = ReworkRequest(worker=w, tech=t, gap="eval", hint_query=ev.get("feedback", ""))
             return w, f"{tag} → {target} 재조사", {
                 **base, **CLEAR_SYNTHESIS, "rework_request": req, "retry": {target: retry.get(target, 0) + 1}}
-    return "report", f"{tag} → 실행 가능한 target 없음, 보고서 재작성", {**base, **CLEAR_REPORT}
+    # 되돌릴 셀이 전부 재작업 소진이고 report 도 target 이 아니면, 보고서를 다시 써도 고쳐지지 않는다 (#129 — 4장 문제는 셀 target)
+    return "end_with_warning", f"보고서 평가 fail({failed}) · 되돌릴 곳 소진 (targets {', '.join(ev.get('targets') or []) or '없음'})", {}
 
 
 def supervisor(state: GraphState) -> dict:
@@ -217,6 +219,8 @@ def _insert_warning(md: str, items: list[str]) -> str:
 def end_with_warning(state: GraphState) -> dict:
     items = unmet(state)
     log_decision(state, "end_with_warning", END, "; ".join(items))
+    # 근거 부족 셀은 6장 한계점이 정본(report_render, #128) — 경고 절에는 상한 · 실패 · 평가 미달만 남겨 중복을 없앤다
+    items = [x for x in items if not x.startswith("근거 부족 셀 ")]
     out: dict[str, Any] = {"status": "SUCCESS" if _has_report(state) else "INTERRUPTED"}
     uri = state.get("report_uri")
     if uri and Path(uri).exists():
