@@ -2,7 +2,7 @@
 
 1. config/domain.yaml · config/selection.yaml 로드 → trace_id 생성 → init_state
 2. 인덱스(data/index/)가 없으면 rag.indexing.build_index()  (--skip-index 로 건너뜀)
-3. graph 를 stream 으로 실행 — thread_id = trace_id (체크포인터) · LangSmith metadata.trace_id 같은 값 · recursion_limit = RECURSION_LIMIT
+3. graph 를 stream 으로 실행 — observe.run_config: thread_id(체크포인터) · LangSmith metadata.trace_id · tags · run_name 이 같은 trace_id, recursion_limit = RECURSION_LIMIT
 4. 실패해도 남는 것: outputs/run.json(trace_id · 어디까지 갔나 · step_count · retry · eval_attempts · llm_calls · node_status)
    + 채워진 키의 JSON (체크포인터의 마지막 State 기준)
 5. 보고서: report_uri (B 이행 후) 또는 report_md → outputs/report/report.md (+ PDF, weasyprint 있을 때)
@@ -17,14 +17,13 @@ import json
 import os
 import sys
 import time
-import uuid
-from datetime import datetime
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
 
 from graph.build import build_graph
+from graph.observe import new_trace_id, run_config
 from graph.state import init_state
 from graph.supervisor import MAX_STEPS, RECURSION_LIMIT
 
@@ -34,14 +33,6 @@ CHECKPOINT_DB = OUT / "checkpoints.sqlite"
 DUMP_KEYS = ("citations", "synthesis", "trl_estimate", "tech_summary", "market_eval", "stakeholder_eval",
              "domain_eval", "sufficiency", "eval_result", "errors",
              "retrieval_log", "neutrality")        # 마지막 둘은 이행 중 키 (graph/state.py)
-
-
-def new_trace_id() -> str:
-    try:
-        from graph.observe import new_trace_id as observe_new  # A
-        return observe_new()
-    except ImportError:
-        return f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
 
 
 def make_checkpointer():
@@ -119,12 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     app = build_graph(checkpointer=checkpointer)
     trace_id = args.resume or new_trace_id()
-    config = {
-        "configurable": {"thread_id": trace_id},  # 체크포인터 키 = trace_id
-        "metadata": {"trace_id": trace_id},       # LangSmith run metadata — 같은 값으로 검색
-        "run_name": f"kvcache-agent {trace_id}",
-        "recursion_limit": RECURSION_LIMIT,
-    }
+    config = run_config(trace_id, RECURSION_LIMIT)   # thread_id = metadata.trace_id = tags = run_name (graph/observe.py)
     inputs = None if args.resume else init_state(domain, selected, trace_id=trace_id, max_steps=MAX_STEPS)
     print(f"trace_id={trace_id}" + ("  (resume)" if args.resume else ""))
 
