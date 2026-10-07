@@ -17,6 +17,8 @@ def test_write_chapter_includes_evaluator_feedback(monkeypatch):
     assert result == "수정된 장"
     assert "이전 보고서 평가 피드백" in seen["messages"][1][1]
     assert "REFERENCE 대응을 보강" in seen["messages"][1][1]
+    assert "각 판단 문장 끝에 입력의 출처 태그" in seen["messages"][1][1]
+    assert "삭제하거나 '근거 없음'" in seen["messages"][1][1]
 
 
 def test_build_report_passes_feedback_to_all_llm_chapters(monkeypatch):

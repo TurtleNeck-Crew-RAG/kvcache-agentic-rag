@@ -14,6 +14,8 @@ from graph.observe import retrieval_entries
 
 TECHS = ("KIVI", "InfiniGen")
 TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d)[^\]]*\]")     # [논문 p.N] · [웹 URL] · [추론] · [p.N](논문)
+TAG_TOKEN_RE = re.compile(r"\[(?:논문|웹|추론|p\.\d)[^\]]*\]")
+SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 FAIL_MARK = "워커 실패"                                        # graph/safe.py fallback 이 남기는 표식
 
 CHAPTERS = (           # (key, 제목) — 이 순서가 목차다. SUMMARY 맨 앞 · REFERENCE 맨 뒤 고정
@@ -200,8 +202,65 @@ def render_selection(selected: dict[str, Any]) -> str:
 
 # ---------- 4. 관점별 평가 (*_eval · trl_estimate) ----------
 
+def _nearest_tags(parts: list[str], index: int) -> list[str]:
+    """유일한 문단 끝 태그만 앞 문장에 전달한다. 중간 문장의 태그는 빌리지 않는다."""
+    tagged = [i for i, part in enumerate(parts) if TAG_TOKEN_RE.search(part)]
+    if not tagged or tagged[-1] != len(parts) - 1:
+        return []
+    terminal = parts[-1]
+    tag_only = not TAG_TOKEN_RE.sub("", terminal).strip(" .,;")
+    previous_tag = tagged[-2] if len(tagged) > 1 else -1
+    if len(tagged) == 1 or (tag_only and index > previous_tag):
+        return list(dict.fromkeys(TAG_TOKEN_RE.findall(terminal)))
+    return []
+
+
+def _place_tags(part: str, tags: list[str]) -> str:
+    """evaluator가 다음 문장으로 넘기지 않도록 태그를 종결부호 바로 앞에 둔다."""
+    content = TAG_TOKEN_RE.sub("", part).strip()
+    ending = content[-1] if content.endswith((".", "!", "?")) else ""
+    if ending:
+        content = content[:-1].rstrip()
+    return f"{content} {''.join(dict.fromkeys(tags))}{ending}".strip()
+
+
+def _grounded_text(text: str) -> str:
+    """기존 태그는 문장 단위로 보존하고, 대응 태그가 없는 판단은 숨기지 않고 추론으로 표시한다."""
+    lines = []
+    for raw in str(text).splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line == "근거 없음":
+            lines.append(line)
+            continue
+        if line.endswith(":"):
+            lines.append(line)
+            continue
+        parts = [part.strip() for part in SENTENCE_RE.split(line) if part.strip()]
+        grounded = []
+        for index, part in enumerate(parts):
+            if not TAG_TOKEN_RE.sub("", part).strip(" .,;"):
+                continue
+            tags = TAG_TOKEN_RE.findall(part) or _nearest_tags(parts, index) or ["[추론]"]
+            grounded.append(_place_tags(part, tags))
+        if grounded:
+            lines.append(" ".join(grounded))
+    return "\n".join(lines) or "근거 없음"
+
+
+def _report_claim(text: str) -> str:
+    """웹 검증용 원문 전문은 State에만 두고 보고서에는 주장과 출처 태그만 남긴다."""
+    head, separator, tail = str(text).rpartition(" [웹 ")
+    if separator and " (원문:" in head and tail.endswith("]"):
+        text = head.split(" (원문:", 1)[0] + separator + tail
+    return _grounded_text(text)
+
+
 def _bullets(items: list[str], indent: str = "    ") -> list[str]:
-    return [f"{indent}- {x}" for x in items] if items else [f"{indent}- 근거 없음"]
+    rendered = [_report_claim(item) for item in items]
+    rendered = [item for item in rendered if item != "근거 없음"]
+    return [f"{indent}- {x}" for x in rendered] if rendered else [f"{indent}- 근거 없음"]
 
 
 def _eval_block(tech: str, e: dict[str, Any], *, compact: bool = False) -> list[str]:
@@ -210,21 +269,33 @@ def _eval_block(tech: str, e: dict[str, Any], *, compact: bool = False) -> list[
     if e.get("verdict"):
         out.append(f"    - 판정: {e['verdict']}")
     if compact:
-        positives = e.get("positives", [])[:2]
-        negatives = [n for n in e.get("negatives", []) if "확보 실패" not in n][:2]
+        positives = [_report_claim(item) for item in e.get("positives", [])]
+        negatives = [_report_claim(item) for item in e.get("negatives", [])]
+        positives = [item for item in positives if item != "근거 없음"]
+        negatives = [item for item in negatives if item != "근거 없음"]
+        positives = positives[:2]
+        negatives = negatives[:2]
         out.append("    - 긍정: " + (" / ".join(positives) if positives else "근거 없음"))
         out.append("    - 부정: " + (" / ".join(negatives) if negatives else "근거 없음"))
         if e.get("axes"):
-            out.append("    - 3축: " + " · ".join(f"{k} — {v}" for k, v in e["axes"].items()))
+            axes = [f"{k} — {_grounded_text(v)}" for k, v in e["axes"].items()]
+            grounded_axes = [axis for axis in axes if not axis.endswith("근거 없음")]
+            if grounded_axes:
+                out.append("    - 3축: " + " · ".join(grounded_axes))
         return out
     if e.get("rationale"):
-        out.append(f"    - 근거: {e['rationale']}")
+        rationale = _grounded_text(e["rationale"])
+        if rationale != "근거 없음":
+            out.append(f"    - 근거: {rationale}")
     out.append("    - 긍정:")
     out += _bullets(e.get("positives", []), "        ")
     out.append("    - 부정:")
     out += _bullets(e.get("negatives", []), "        ")
     if e.get("axes"):
-        out.append("    - 3축: " + " · ".join(f"{k} — {v}" for k, v in e["axes"].items()))
+        axes = [f"{k} — {_grounded_text(v)}" for k, v in e["axes"].items()]
+        grounded_axes = [axis for axis in axes if not axis.endswith("근거 없음")]
+        if grounded_axes:
+            out.append("    - 3축: " + " · ".join(grounded_axes))
     if "confidence" in e:
         out.append(f"    - confidence: {e['confidence']}")
     return out
