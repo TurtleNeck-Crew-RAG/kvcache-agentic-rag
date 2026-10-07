@@ -1,4 +1,4 @@
-"""이해관계자 평가 에이전트 (웹) — 설계서 2장, 4.3 Rubric (찬·반 각 ≥2 — retry 시 '반대 근거 검색' 지시, 실패도 기록).  [소유: B 심준용]
+"""이해관계자 평가 에이전트 (웹) — 설계서 2장, 4.3 Rubric (찬·반 각 ≥2 — 재작업 시 부족 근거 보강).  [소유: B 심준용]
 
 출력 키: stakeholder_eval · citations · llm_calls
 """
@@ -11,10 +11,10 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from agents import _web_eval as web
-from graph.dispatcher import LLM_BUDGET
 from graph.state import GraphState
 
 FAILURE = "반대 근거 확보 실패 [추론]"
+MAX_REWORKS = 2
 
 
 class StakeholderGroup(BaseModel):
@@ -31,22 +31,37 @@ class StakeholderResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
-def queries(tech: str, retry: int) -> list[str]:
-    if retry:
-        focus = "criticism limitations adoption barriers" if retry == 1 else "unresolved issues compatibility reproduction failures"
-        return [
-            f'"{tech}" KV cache {focus} accuracy overhead',
-            f'"{tech}" KV cache site:github.com issues {focus}',
-            f'"{tech}" KV cache independent review {focus}',
+def queries(tech: str, *, negative_only: bool = False, hint_query: str = "") -> list[str]:
+    if negative_only:
+        base = [
+            f'"{tech}" KV cache criticism limitations adoption barriers accuracy overhead',
+            f'"{tech}" KV cache site:github.com issues unresolved compatibility reproduction failures',
+            f'"{tech}" KV cache independent review criticism limitations',
         ]
-    competitor = "TurboQuant KVTC" if tech == "KIVI" else '"LLM in a flash" "LPDDR-PIM"'
-    return [
-        f'"{tech}" KV cache {competitor} comparison recognition criticism',
-        f'"{tech}" KV cache developer adoption benefits experience',
-        f'"{tech}" KV cache developer issues accuracy complexity hardware limitations',
-        f'"{tech}" KV cache investor media analysis opportunity risks',
-        f'"{tech}" KV cache {competitor} benefits supporting evidence',
-    ]
+    else:
+        competitor = "TurboQuant KVTC" if tech == "KIVI" else '"LLM in a flash" "LPDDR-PIM"'
+        base = [
+            f'"{tech}" KV cache {competitor} comparison recognition criticism',
+            f'"{tech}" KV cache developer adoption benefits experience',
+            f'"{tech}" KV cache developer issues accuracy complexity hardware limitations',
+            f'"{tech}" KV cache investor media analysis opportunity risks',
+            f'"{tech}" KV cache {competitor} benefits supporting evidence',
+        ]
+    if hint_query.strip():
+        return [f'"{tech}" KV cache {hint_query.strip()}', *base]
+    return base
+
+
+def _targets(state: GraphState) -> tuple[tuple[str, ...], dict | None]:
+    """이해관계자 재작업이면 요청된 기술만, 아니면 두 기술을 처음 평가한다."""
+    request = state.get("rework_request")
+    if not request or request.get("worker") != "stakeholder":
+        return web.TECHS, None
+
+    tech = request.get("tech")
+    if tech not in web.TECHS:
+        raise ValueError(f"unknown stakeholder rework technology: {tech!r}")
+    return (tech,), request
 
 
 def _evaluate(response: StakeholderResponse, sources: dict) -> tuple[dict, list]:
@@ -122,12 +137,13 @@ def _finish(result: dict, exhausted: bool) -> None:
             result["negatives"].append(FAILURE)
             web.add_note(result, "반대 근거 확보 실패")
         else:
-            # Dispatcher가 len(negatives)를 사용하므로 중간 실패 표시는 여기에만 쓴다.
+            # assess가 실제 근거 수를 판정하므로 중간 실패 표시는 rationale에만 남긴다.
             web.add_note(result, "반대 근거 2건 미만 — 재검색 필요")
 
 
-def _attempt(tech: str, summary: dict, retry: int, previous: dict) -> tuple[dict, list, int]:
-    sources, notes = web.search(queries(tech, retry))
+def _attempt(tech: str, summary: dict, *, negative_only: bool, hint_query: str,
+             attempt: int, previous: dict) -> tuple[dict, list, int]:
+    sources, notes = web.search(queries(tech, negative_only=negative_only, hint_query=hint_query))
     calls, refs = 0, []
     if not sources:
         result = web.blank("이해관계자 웹 근거 없음")
@@ -136,7 +152,7 @@ def _attempt(tech: str, summary: dict, retry: int, previous: dict) -> tuple[dict
             model = web.generator(StakeholderResponse)
             prompt = web.messages(
                 "stakeholder", "rubrics/4.3-stakeholder", tech, summary, sources,
-                mode="negative_only" if retry else "balanced", retry=retry,
+                mode="negative_only" if negative_only else "balanced", retry=attempt,
                 previous_eval=previous,
             )
             calls += 1
@@ -151,24 +167,28 @@ def _attempt(tech: str, summary: dict, retry: int, previous: dict) -> tuple[dict
 
 def run(state: GraphState) -> dict:
     out, citations, calls = {}, [], 0
-    retry = state.get("retry", {}).get("stake", 0)
-    for tech in web.TECHS:
-        previous = deepcopy(state.get("stakeholder_eval", {}).get(tech, {})) if retry else {}
-        if previous and len([n for n in previous["negatives"] if n != FAILURE]) >= 2:
-            out[tech] = previous
-            continue
+    targets, request = _targets(state)
+    for tech in targets:
+        is_rework = request is not None
+        previous = deepcopy(state.get("stakeholder_eval", {}).get(tech, {})) if is_rework else {}
+        attempt = state.get("retry", {}).get(f"stakeholder:{tech}", 0) if is_rework else 0
+        gap = request.get("gap", "") if request else ""
+        hint_query = request.get("hint_query", "") if request else ""
         summary = state.get("tech_summary", {}).get(tech)
         if summary:
-            result, refs, attempted = _attempt(tech, summary, retry, previous)
+            result, refs, attempted = _attempt(
+                tech, summary,
+                negative_only=is_rework and gap == "negatives",
+                hint_query=hint_query,
+                attempt=attempt,
+                previous=previous,
+            )
             calls += attempted
             citations.extend(refs)
         else:
             result = _merge(previous, web.blank("기술 조사 입력 없음"))
+        _finish(result, exhausted=is_rework and attempt >= MAX_REWORKS)
         out[tech] = result
-    # 한 기술 처리 중 예산 초과가 발생해도 양쪽 모두 종료 상태를 정확하게 기록한다.
-    exhausted = retry >= 2 or state.get("llm_calls", 0) + calls > LLM_BUDGET   # 상한은 dispatcher 한 곳에서 (#29: 100 → 150)
-    for result in out.values():
-        _finish(result, exhausted)
     return {"stakeholder_eval": out,
             "citations": web.new_citations(citations, state.get("citations", [])),
             "llm_calls": calls}
