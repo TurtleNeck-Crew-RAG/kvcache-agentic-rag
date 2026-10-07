@@ -57,3 +57,34 @@ def test_main_writes_markdown(_out):
     _decide(0, "__end__", "보고서 평가 pass")
     assert rs.main(["--md"]) == 0
     assert (_out / "run_summary.md").read_text(encoding="utf-8").startswith("# 실행 요약 — `T`")
+
+
+def test_rework_effect_tracks_verdict_per_round(_out):
+    _write(_out, "run.json", {"trace_id": "T", "retry": {}})
+    _write(_out, "sufficiency.json", {
+        "market:InfiniGen": {"rule": "fail", "judge": None, "reason": "출처 편중 github.com 70% — 과반"},
+        "domain:KIVI": {"rule": "pass", "judge": "sufficient", "reason": "ok"},
+        "stakeholder:KIVI": {"rule": "fail", "judge": None, "reason": "반대 근거 1건 < 2"}})
+    _decide(1, "market", "부족 셀 market:InfiniGen 재작업 1/2 — 출처 편중 github.com 88% — 과반")
+    _decide(2, "market", "부족 셀 market:InfiniGen 재작업 2/2 — 출처 편중 github.com 75% — 과반")
+    _decide(3, "domain", "부족 셀 domain:KIVI 재작업 1/2 — 웹 근거 0건 < 1 (웹 반례 필요)")
+    _decide(4, "stakeholder", "부족 셀 stakeholder:KIVI 재작업 1/2 — 반대 근거 1건 < 2")
+    _decide(5, "stakeholder", "부족 셀 stakeholder:KIVI 재작업 2/2 — 반대 근거 1건 < 2")
+    rows = {r["cell"]: r for r in rs.summarize()["rework_effect"]}
+    assert rows["domain:KIVI"]["effect"] == "해소" and rows["domain:KIVI"]["states"][-1] == "충분"
+    assert rows["market:InfiniGen"]["effect"] == "개선"                 # 88 → 75 → 70
+    assert rows["stakeholder:KIVI"]["effect"] == "변화 없음"            # 2회째가 판정을 못 바꿈
+    md = rs.to_markdown(rs.summarize())
+    assert "재작업 회차별 판정 변화" in md and "2회째 재작업이 판정을 바꾼 셀: **1/2**" in md
+
+
+def test_judge_wording_change_is_not_improvement(_out):
+    # 같은 문제(Judge off_topic)로 다시 부족한데 LLM 문장만 바뀐 경우 — "개선" 이 아니라 "변화 없음"
+    _write(_out, "run.json", {"trace_id": "T"})
+    _write(_out, "sufficiency.json", {"market:KIVI": {
+        "rule": "pass", "judge": "insufficient", "gap": "off_topic", "reason": "근거 6건 · Judge: 시장 근거가 여전히 기술 수치 위주"}})
+    _decide(1, "market", "부족 셀 market:KIVI 재작업 1/2 — gap=off_topic · 근거 6건 · Judge: 시장 규모 근거 부족")
+    _decide(2, "market", "부족 셀 market:KIVI 재작업 2/2 — gap=off_topic · 근거 7건 · Judge: 수요 근거가 없음")
+    row = rs.summarize()["rework_effect"][0]
+    assert row["effect"] == "변화 없음"
+    assert rs._verdict_key("근거 6건 · Judge: 표현 A") == rs._verdict_key("근거 6건 · Judge: 표현 B")
