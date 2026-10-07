@@ -5,6 +5,7 @@
 추가 편향 검증 장치와 중립성 Judge는 #15에서 결합한다.
 
 출력 키: domain_eval · citations · retrieval_log · llm_calls
+검색 로그 정본은 outputs/retrieval_log.jsonl (graph/observe) — State retrieval_log 반환은 이행 중(#62)
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from langchain_tavily import TavilySearch
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from agents._common import TECHS, llm, load_prompt
+from graph.observe import log_retrieval
 from graph.state import Evidence, GraphState, Ref, RetrievalEntry
 from rag.rag_node import ask
 
@@ -245,6 +247,7 @@ def run(state: GraphState) -> dict:
         }
         citations.extend(_web_refs(web_evidence, referenced_urls))
 
+    log_retrieval(state.get("trace_id", ""), retrieval_log)
     return {
         "domain_eval": evaluations,
         "citations": citations,
