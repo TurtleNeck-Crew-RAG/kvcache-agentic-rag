@@ -3,9 +3,25 @@ name: 검사
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, agent-supervisor]
 
 jobs:
+  base-branch:
+    # Agent 과제 PR 은 무조건 agent-supervisor 로. main 은 RAG 제출본으로 동결 (CONTRIBUTING.md 2절)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR base 브랜치 검사
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          # 예외: main 의 이슈 · PR 템플릿 반영 (#50) — 템플릿은 기본 브랜치에서만 읽히기 때문
+          if [ "$BASE" = "main" ] && [ "$HEAD" != "chore/50-agent-templates" ]; then
+            echo "::error::PR base 가 main 입니다. Agent 과제 PR 은 base 를 agent-supervisor 로 바꾸세요 (PR 화면 위 'Edit' → base 드롭다운)."
+            exit 1
+          fi
+
   check:
     runs-on: ubuntu-latest
     steps:
