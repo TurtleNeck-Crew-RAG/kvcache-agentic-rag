@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from graph.observe import retrieval_entries
+
 TECHS = ("KIVI", "InfiniGen")
 TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d)[^\]]*\]")     # [논문 p.N] · [웹 URL] · [추론] · [p.N](논문)
 FAIL_MARK = "워커 실패"                                        # graph/safe.py fallback 이 남기는 표식
@@ -304,7 +306,7 @@ def limitation_stats(state: dict[str, Any]) -> dict[str, Any]:
     tagged = _tagged_statements(state)
     stmts = [s for s, _ in tagged]
     inference_only = [s for s, tags in tagged if tags == {"추론"}]
-    log = state.get("retrieval_log") or []
+    log = retrieval_entries(state)
     rewritten = [r for r in log if r.get("rewritten")]
     return {
         "tagged_total": len(stmts),
