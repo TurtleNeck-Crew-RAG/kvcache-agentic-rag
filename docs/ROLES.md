@@ -38,7 +38,7 @@ START → supervisor ──route()──┬─ tech_research ─┐
   "`judge_node` → `gate()`" · "결정론 층이 먼저 거르고 통과된 것만 Judge 로". 수업 노트북 `07-Supervisor-Advanced` 의
   `RelevanceChecker → Supervisor` 구조와 같다.
 - **매 턴 워커 1명** — 교안 p.71 · p.123: Supervisor 는 "State 기준으로 1개씩 순차 호출". RAG 때의 3개 병렬 fan-out 은 없앤다.
-- **종료는 코드가 강제** — `max_steps`(구조에서 계산) · 셀별 재작업 ≤2(라운드 로빈) · 평가 루프 ≤2 · 토큰 예산 `TOKEN_BUDGET`(마무리 예약분 `FINAL_RESERVE`) + 호출 수 `LLM_BUDGET` · `recursion_limit` · 벽시계 `RUN_TIMEOUT`(게이트 밖, `app.py`) (교안 p.167 · #102).
+- **종료는 코드가 강제** — `max_steps`(구조에서 계산) · 셀별 재작업 ≤2(라운드 로빈) · 평가 루프 ≤2 · 토큰 예산 `TOKEN_BUDGET`(마무리 예약분 `FINAL_RESERVE`) · `recursion_limit` · 벽시계 `RUN_TIMEOUT`(게이트 밖, `app.py`) (교안 p.167 · #102).
 
 ### 실무 관점 — 이 설계는 Workflow 인가 Agent 인가
 
@@ -203,7 +203,7 @@ last_error: ErrorRecord | None                    # {node, type, message, ts}
 | 워커 반환 | 자기 출력 키 + `citations` + `llm_calls` 만. **`next` · `retry` · `sufficiency` · `eval_result` 는 절대 쓰지 않는다** |
 
 README State Schema 7항목과의 대응: 제어 vs 페이로드 = 위 3구역 · 관측성 = `observe.py` 외부 적재 · 지속성 = `report_uri` · `retrieval_log.jsonl` ·
-상관 = `trace_id` · 재개 = 체크포인터 + `node_status` · `last_error` · 동시 처리 = `merge_by_tech` 등 reducer · 종료 = `max_steps` · `retry` · `eval_attempts` · `tokens`(`TOKEN_BUDGET` − `FINAL_RESERVE`) · `LLM_BUDGET` · `RUN_TIMEOUT`(app.py)
+상관 = `trace_id` · 재개 = 체크포인터 + `node_status` · `last_error` · 동시 처리 = `merge_by_tech` 등 reducer · 종료 = `max_steps` · `retry` · `eval_attempts` · `tokens`(`TOKEN_BUDGET` − `FINAL_RESERVE`) · `RUN_TIMEOUT`(app.py)
 
 ---
 

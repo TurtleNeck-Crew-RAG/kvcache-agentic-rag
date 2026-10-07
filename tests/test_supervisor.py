@@ -9,7 +9,6 @@ import graph.supervisor as sup
 from graph.state import TECHS, init_state
 from graph.supervisor import (
     FINAL_RESERVE,
-    LLM_BUDGET,
     MAX_EVAL,
     MAX_REWORK,
     MAX_STEPS,
@@ -93,9 +92,18 @@ def test_judge_insufficient_also_reworks_but_exhausted_goes_on():
 
 def test_budget_stops_rework_only():
     s = _collected()
-    s["llm_calls"] = LLM_BUDGET + 1
+    s["tokens"] = TOKEN_BUDGET
     s["sufficiency"] = {"market:KIVI": {"rule": "fail", "judge": None, "gap": "", "hint_query": "", "reason": ""}}
     assert supervisor(s)["next"] == "synthesis"
+
+
+def test_call_count_no_longer_gates():
+    """#102 — 호출 수 상한(LLM_BUDGET) 제거. llm_calls 는 보고용, 예산은 토큰만 본다."""
+    assert not hasattr(sup, "LLM_BUDGET")
+    s = _collected()
+    s["llm_calls"] = 10_000
+    s["sufficiency"] = {"market:KIVI": {"rule": "fail", "judge": None, "gap": "", "hint_query": "", "reason": ""}}
+    assert supervisor(s)["next"] == "market"
 
 
 def test_synthesis_then_report_then_end_on_pass():
