@@ -143,3 +143,10 @@ def test_inference_tagged_evidence_is_not_counted():
     ts = {"overview": "o", "mechanism": "m", "numbers": ["n"], "limitations": ["l"], "apply_conditions": [],
           "evidence": ev("2402.02750", 2, tag="논문") + [{"claim": "Faithfulness 미통과", "tag": "추론", "ref": "judge", "page": None}]}
     assert su.rule_check("tech_research", "KIVI", ts, {})["gap"] == "evidence"
+
+
+def test_failure_marker_in_negatives_is_not_counted():
+    # stakeholder 는 재작업 상한 후 "반대 근거 확보 실패 [추론]" 을 붙인다 (#73) — 이건 반대 근거가 아니다
+    payload = {**GOOD, "negatives": ["진짜 반대 1", "반대 근거 확보 실패 [추론]"]}
+    v = su.rule_check("stakeholder", "KIVI", payload, {})
+    assert v["gap"] == "negatives" and "1건" in v["reason"]

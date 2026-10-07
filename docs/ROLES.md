@@ -95,13 +95,13 @@ START → supervisor ──route()──┬─ tech_research ─┐
 | 워커 실패 | 전 관점 | `node_status == "failed"` 또는 safe fallback | `failed` | 실패 기록은 근거가 아니다 |
 | 등급 과반이 "근거 없음" | 시장 · 이해관계자 · 도메인 | 하위 항목 과반 | `no_evidence` | — |
 | 근거 건수 | 전 관점 | `[논문]` · `[웹]` **≥3** (`[추론]` · Faithfulness 미통과 메모 제외) | `evidence` | 출처 없는 문장은 근거가 아니다 (#64 리뷰) |
-| 반대 근거 | 시장 · 이해관계자 · 도메인 | **≥2** | `negatives` | RAG 확증편향 방지 장치 7 그대로. 질은 Judge 기준 3 |
+| 반대 근거 | 시장 · 이해관계자 · 도메인 | **≥2** — `[추론]` 으로 끝나는 표시("반대 근거 확보 실패 [추론]")는 세지 않음 | `negatives` | RAG 확증편향 방지 장치 7 그대로. 질은 Judge 기준 3 |
 | 출처 다양성 | 시장 · 이해관계자 (웹만 쓰는 관점) | 출처 **≥2곳**, 한 출처가 **과반(>50%)이면 부족** | `source_bias` | 단일 출처 편중 = 확증편향 (노션 「편향 통제」) |
-| 웹 반례 | 도메인 | `[웹]` 근거 **≥1** | `counter_example` | 도메인 = 논문 사실 추출 + 웹 반례 (RAG 설계서 4.4 · `domain.yaml`) |
+| 웹 근거 | 도메인 | `[웹]` 근거 **≥1** — 반례인지(지지 근거가 아닌지)는 규칙이 못 보고 **Judge 기준 3** 이 본다 | `counter_example` | 도메인 = 논문 사실 추출 + 웹 반례 (RAG 설계서 4.4 · `domain.yaml`) |
 | 수치 · 한계 | 기술 조사 | 수치 ≥1 · 한계 ≥1 (한계가 반대 근거 역할) | `numbers` · `limitations` | 검색 대상이 그 기술 논문 1편 → **출처 다양성은 보지 않는다** |
 | LLM Judge (규칙 통과 셀만) | 전 관점 | ① 주장↔근거 대응 ② 관점 적합성 ③ 반대 근거의 실질 ④ 우열 판정 없음 | `unsupported` · `off_topic` · `negatives` · `bias` | 형식은 규칙이, 내용은 Judge 가 |
 
-지난 RAG 제출 실행 데이터로 확인: 8셀 중 부족 5셀 (시장 InfiniGen github 88% · 이해관계자 KIVI 자기 논문 75% · 이해관계자 InfiniGen 근거 없음 · 도메인 KIVI 웹 반례 0 · 시장 KIVI Judge off_topic).
+지난 RAG 제출 실행 데이터로 확인: 8셀 중 부족 5셀 (시장 InfiniGen github 88% · 이해관계자 KIVI 자기 논문 75% · 이해관계자 InfiniGen 근거 없음 · 도메인 KIVI 웹 근거 0 · 시장 KIVI Judge off_topic).
 일부러 기준을 낮추거나 올리지 않는다 — 첫 실제 통합 실행 뒤 **오판정이 있을 때만** 한 번 조정하고, 바꾸면 README Lessons Learned 에 한 줄.
 
 ### B 심준용 — 시장 · 이해관계자 재작업, 보고서, 실증 자료
