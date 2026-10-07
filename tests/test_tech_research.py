@@ -39,3 +39,46 @@ def test_run_uses_fallback_only_on_failure(monkeypatch):
     assert kivi["limitations"] and kivi["numbers"] and kivi["overview"].endswith("[p.3]")
     assert out["llm_calls"] == 33
     assert not any("KIVI" in q and "InfiniGen" in q for _, q in seen)   # 기술별 독립 호출
+
+
+def _fake_ask_factory(seen, answer="보강 답[p.7]"):
+    def fake_ask(tech, q, node, **kw):
+        seen.append((tech, q))
+        return {"answer": answer, "evidence": [{"claim": "new", "tag": "논문", "ref": "x", "page": 7}],
+                "retrieval_entry": {"tech": tech, "relevance": "yes"}, "citations": [{"id_or_url": tech}],
+                "llm_calls": 3, "faithful": True, "unsupported": []}
+    return fake_ask
+
+
+PREV = {"overview": "o[p.1]", "mechanism": "m", "numbers": ["n[p.1]"], "limitations": [], "apply_conditions": [],
+        "evidence": [{"claim": "old", "tag": "논문", "ref": "x", "page": 1}]}
+
+
+def test_rework_reinforces_only_requested_tech_and_field(monkeypatch):
+    seen = []
+    monkeypatch.setattr(tr, "ask", _fake_ask_factory(seen))
+    st = {"tech_summary": {"KIVI": PREV, "InfiniGen": {"overview": "keep"}},
+          "rework_request": {"worker": "tech_research", "tech": "KIVI", "gap": "limitations", "hint_query": "KIVI 한계?"}}
+    out = tr.run(st)
+    assert seen == [("KIVI", "KIVI 한계?")] and out["llm_calls"] == 3
+    k = out["tech_summary"]["KIVI"]
+    assert k["limitations"] == ["보강 답[p.7]"] and [e["claim"] for e in k["evidence"]] == ["old", "new"]
+    assert out["tech_summary"]["InfiniGen"] == {"overview": "keep"}       # 다른 기술은 그대로
+    assert PREV["limitations"] == []                                      # 원본 State 를 고치지 않음
+
+
+def test_rework_full_rerun_on_failed_gap(monkeypatch):
+    seen = []
+    monkeypatch.setattr(tr, "ask", _fake_ask_factory(seen))
+    st = {"tech_summary": {"KIVI": PREV},
+          "rework_request": {"worker": "tech_research", "tech": "InfiniGen", "gap": "failed", "hint_query": "x"}}
+    out = tr.run(st)
+    assert {t for t, _ in seen} == {"InfiniGen"} and len(seen) == 5     # 고정 질문 5, 그 기술만
+    assert set(out["tech_summary"]) == {"KIVI", "InfiniGen"}
+
+
+def test_rework_for_other_worker_is_ignored(monkeypatch):
+    seen = []
+    monkeypatch.setattr(tr, "ask", _fake_ask_factory(seen))
+    tr.run({"rework_request": {"worker": "market", "tech": "KIVI", "gap": "negatives", "hint_query": "x"}})
+    assert len(seen) == 10                                                # 일반 경로 (5 × 2)
