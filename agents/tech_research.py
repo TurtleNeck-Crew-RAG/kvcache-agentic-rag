@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 
 from agents._common import TECHS, load_prompt
+from graph.observe import log_retrieval
 from graph.state import GraphState, TechSummary
 from rag.rag_node import NO_EVIDENCE, ask
 
@@ -92,6 +93,7 @@ def rework(state: GraphState, req: dict) -> dict:
         s, c, lg, n = research(tech)
     else:
         s, c, lg, n = reinforce(prev, tech, gap, req["hint_query"])
+    log_retrieval(state.get("trace_id", ""), lg)
     # 다른 기술 결과도 그대로 실어 보낸다 — merge_by_tech 리듀서 전/후 어느 쪽에서도 안전
     return {"tech_summary": {**(state.get("tech_summary") or {}), tech: s},
             "citations": c, "retrieval_log": lg, "llm_calls": n}
@@ -108,6 +110,7 @@ def run(state: GraphState) -> dict:
         citations += c
         log += lg
         calls += n
+    log_retrieval(state.get("trace_id", ""), log)        # 정본은 outputs/retrieval_log.jsonl — State 반환은 이행 중(#62)
     return {"tech_summary": tech_summary, "citations": citations, "retrieval_log": log, "llm_calls": calls}
 
 
