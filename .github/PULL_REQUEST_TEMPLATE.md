@@ -1,9 +1,9 @@
 <!-- 제목: [FEAT] 이해관계자 워커 — 찬반 각 2건 강제  (이슈 제목과 맞추기) -->
 
 > [!IMPORTANT]
-> **Agent 과제 PR 은 base 를 `agent-supervisor` 로** 바꾸세요 (화면 위 `base:` 드롭다운 — 기본값이 `main`).
+> **Agent 과제 PR 은 base 가 `agent-supervisor`** 인지 확인하세요 (기본 브랜치라 기본값으로 잡힙니다).
 > `main` 은 RAG 제출본으로 동결입니다.
-> base 가 `agent-supervisor` 면 `closes #N` 으로 이슈가 **자동으로 닫히지 않습니다** → 머지한 사람이 이슈를 직접 Close.
+> `closes #N` 을 채우면 머지할 때 이슈가 자동으로 닫힙니다.
 > 분담 · State 계약: `agent-supervisor` 브랜치의 `docs/ROLES.md` · `CONTRIBUTING.md`
 
 ## 관련 이슈

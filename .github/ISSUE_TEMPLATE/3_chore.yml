@@ -7,9 +7,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        > **Agent 과제(`agent-supervisor`) 작업입니다.** 이슈를 만든 뒤 오른쪽 **Development → Create a branch** 팝업에서
-        > **Change branch source → `agent-supervisor`** 를 고르세요 (기본값 `main` 은 RAG 제출본으로 동결).
-        > PR 도 base 를 `agent-supervisor` 로. 이 경우 머지해도 이슈가 자동으로 닫히지 않으니 직접 Close 하세요.
+        > **Agent 과제(`agent-supervisor`) 작업입니다.** 기본 브랜치가 `agent-supervisor` 라서
+        > **Development → Create a branch** 로 만들면 자동으로 여기서 갈라지고, PR base 도 기본값으로 잡힙니다.
+        > `main` 은 RAG 제출본으로 동결. PR 본문의 `closes #N` 으로 머지 시 이 이슈가 자동으로 닫힙니다.
 
   - type: dropdown
     id: kind
