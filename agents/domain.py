@@ -2,7 +2,11 @@
 
 1단계에서 논문의 기술 사실을 RAG로 추출하고, Tavily로 HW 반례를
 수집한 뒤 2단계에서 스마트폰 배포 제약을 기준으로 적용 가능성을 판정한다.
-추가 편향 검증 장치와 중립성 Judge는 #15에서 결합한다.
+
+재작업(rework_request.worker == "domain")이면 요청된 기술 하나만 다시 돈다 (#81).
+- 이전 결과가 없거나 믿을 수 없는 gap(missing · failed · no_evidence) → 그 기술만 처음부터
+- 그 밖에는 기존 평가 + hint_query 보강 검색(웹 반례 · 출처 gap 은 웹, 나머지는 논문 RAG)으로 DomainEval 재생성
+- 반환 domain_eval 에는 요청 기술만 — merge_by_tech 리듀서가 다른 기술 결과를 지킨다
 
 출력 키: domain_eval · citations · retrieval_log · llm_calls
 검색 로그 정본은 outputs/retrieval_log.jsonl (graph/observe) — State retrieval_log 반환은 이행 중(#62)
@@ -30,6 +34,10 @@ FACT_QUESTIONS = (
     "정확도 손실 수치와 그 실험 조건은 무엇인가?",
     "전송, 프리패치 또는 추가 연산 오버헤드는 무엇인가?",
 )
+FULL_RERUN_GAPS = {"missing", "failed", "no_evidence"}            # 이전 결과를 근거로 쓸 수 없다
+WEB_GAPS = {"counter_example", "source_bias", "bias", "negatives"}  # 웹 반례 · 출처 다양성 · 반대 근거
+PAPER_GAPS_SKIP = {"counter_example", "source_bias", "bias"}         # 논문 RAG 로는 못 메우는 gap
+MAX_HINT_CHARS = 200                                                 # evaluator feedback 이 hint 로 오면 길다
 SOURCE_TAG = re.compile(r"\[(?:논문|웹|추론|p\.\d)[^\]]*\]")   # [논문 p.2, p.9] · [논문 2406.19707 p.9] · [p.3] · [웹 URL] · [추론] — 실출력은 쪽을 여러 개 묶는다(5회차)
 
 
@@ -80,13 +88,26 @@ def _render_prompt(
     domain_spec: dict[str, Any],
     facts: list[dict[str, Any]],
     web_evidence: list[dict[str, Any]],
+    rework: dict[str, Any] | None = None,
 ) -> str:
     constraints = {
         key: value for key, value in domain_spec.items() if key != "counter_examples"
     }
+    rework_parts = ()
+    if rework:
+        rework_parts = (
+            "## 재작업 요청\n"
+            + json.dumps(
+                {"gap": rework["gap"], "hint_query": rework["hint"], "previous": rework["previous"]},
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            ),
+        )
     return "\n\n".join(
         (
             load_prompt("domain"),
+            *rework_parts,
             "## Rubric\n" + load_prompt("rubrics/4.4-domain"),
             f"## 평가 기술\n{tech}",
             "## 도메인 제약\n"
@@ -110,10 +131,14 @@ def _normalise_search_results(raw: Any) -> list[dict[str, Any]]:
 def _search_counter_examples(
     search: TavilySearch,
     counter_examples: list[str],
+    extra_queries: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     collected: list[dict[str, Any]] = []
-    for name in counter_examples:
-        query = f"{name} mobile LLM memory offloading bandwidth latency hardware evaluation"
+    jobs = [
+        (name, f"{name} mobile LLM memory offloading bandwidth latency hardware evaluation")
+        for name in counter_examples
+    ] + [("rework", query) for query in extra_queries]
+    for name, query in jobs:
         raw = search.invoke({"query": query})
         for item in _normalise_search_results(raw):
             collected.append(
@@ -188,53 +213,99 @@ def _as_domain_eval(value: DomainEvaluationOutput) -> dict[str, Any]:
     return data
 
 
+def _new_search() -> TavilySearch:
+    return TavilySearch(max_results=3, search_depth="advanced", include_answer=False)
+
+
+def _rework_request(state: GraphState) -> dict[str, Any] | None:
+    request = state.get("rework_request") or {}
+    if request.get("worker") != "domain":
+        return None
+    if request.get("tech") not in TECHS:
+        raise ValueError(f"unknown domain rework technology: {request.get('tech')!r}")
+    return request
+
+
+def _clip_hint(hint: str) -> str:
+    """hint_query 첫 줄만, 검색 질의 길이로 자른다 (evaluator feedback 은 여러 줄)."""
+    line = next((part.strip() for part in str(hint or "").splitlines() if part.strip()), "")
+    return line[:MAX_HINT_CHARS]
+
+
+def _ask_fact(tech: str, question: str, facts: list, retrieval_log: list) -> int:
+    result = ask(tech, question, node="domain")
+    facts.append(
+        {
+            "question": question,
+            "answer": result.get("answer", "논문에 근거 없음"),
+            "evidence": result.get("evidence", []),
+        }
+    )
+    entry = result.get("retrieval_entry")
+    if entry:
+        retrieval_log.append(entry)
+    return int(result.get("llm_calls", 0))
+
+
+def _merge_evidence(previous: list[dict], new: list[dict]) -> list[dict]:
+    """재작업 결과에 기존 근거를 남긴다 — 재생성이 근거를 덜 고르면 충분성이 오히려 떨어진다."""
+    merged: dict[tuple, dict] = {}
+    for item in [*new, *previous]:
+        merged.setdefault((item.get("tag"), str(item.get("ref")), item.get("claim")), item)
+    return list(merged.values())
+
+
 def run(state: GraphState) -> dict:
-    """도메인 사실 추출과 배포 제약 판정을 순서대로 실행한다."""
+    """도메인 사실 추출과 배포 제약 판정을 순서대로 실행한다. 재작업이면 요청 기술만."""
 
     domain_spec = state.get("domain", {})
     if not domain_spec:
         raise ValueError("domain worker requires state['domain']")
 
+    request = _rework_request(state)
+    techs = (request["tech"],) if request else TECHS
     evaluator = llm("generator").with_structured_output(DomainEvaluationOutput)
     evaluations: dict[str, dict[str, Any]] = {}
     retrieval_log: list[RetrievalEntry] = []
     citations: list[Ref] = []
     llm_calls = 0
+    counter_examples = [str(item) for item in domain_spec.get("counter_examples", [])]
 
-    for tech in TECHS:
+    for tech in techs:
+        previous = (state.get("domain_eval") or {}).get(tech) if request else None
+        gap = str(request.get("gap", "")) if request else ""
+        hint = _clip_hint(request.get("hint_query", "")) if request else ""
+        reinforce = previous is not None and gap not in FULL_RERUN_GAPS and bool(hint)
         facts: list[dict[str, Any]] = []
-
-        for question in FACT_QUESTIONS:
-            result = ask(tech, question, node="domain")
-            facts.append(
-                {
-                    "question": question,
-                    "answer": result.get("answer", "논문에 근거 없음"),
-                    "evidence": result.get("evidence", []),
-                }
-            )
-            entry = result.get("retrieval_entry")
-            if entry:
-                retrieval_log.append(entry)
-            llm_calls += int(result.get("llm_calls", 0))
-
         web_evidence: list[dict[str, Any]] = []
-        if tech == "InfiniGen":
-            web_search = TavilySearch(
-                max_results=3,
-                search_depth="advanced",
-                include_answer=False,
-            )
-            counter_examples = [
-                str(item) for item in domain_spec.get("counter_examples", [])
-            ]
-            web_evidence = _search_counter_examples(web_search, counter_examples)
 
-        prompt = _render_prompt(tech, domain_spec, facts, web_evidence)
+        if reinforce:
+            # 기존 평가 + 보강 근거 — 사실 질의 5개를 다시 돌리지 않는다
+            if gap not in PAPER_GAPS_SKIP:
+                llm_calls += _ask_fact(tech, hint, facts, retrieval_log)
+            if gap in WEB_GAPS:
+                web_evidence = _search_counter_examples(
+                    _new_search(),
+                    counter_examples if tech == "InfiniGen" else [],
+                    (f"{tech} {hint}",),
+                )
+        else:
+            for question in FACT_QUESTIONS:
+                llm_calls += _ask_fact(tech, question, facts, retrieval_log)
+            extra = (f"{tech} {hint}",) if request and hint else ()
+            if tech == "InfiniGen" or extra:
+                web_evidence = _search_counter_examples(
+                    _new_search(), counter_examples if tech == "InfiniGen" else [], extra,
+                )
+
+        rework = {"gap": gap, "hint": hint, "previous": previous} if reinforce else None
+        prompt = _render_prompt(tech, domain_spec, facts, web_evidence, rework)
         structured = evaluator.invoke(prompt)
         if isinstance(structured, dict):
             structured = DomainEvaluationOutput.model_validate(structured)
         evaluation = _as_domain_eval(structured)
+        if reinforce:
+            evaluation["evidence"] = _merge_evidence(previous.get("evidence") or [], evaluation["evidence"])
         evaluations[tech] = evaluation
         llm_calls += 1
 
