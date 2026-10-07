@@ -81,13 +81,28 @@ START → supervisor ──route()──┬─ tech_research ─┐
 
 | 파일 | 함수 | 하는 일 |
 |---|---|---|
-| `graph/sufficiency.py` | `check_rules(state) -> dict[cell, RuleResult]` | **결정론 층.** 8셀(관점 × 기술)마다 evidence ≥3 · 출처 종류 ≥2 · 반대 근거 ≥2 · `grade == "근거 없음"` 아님 · **`node_status[worker] == "failed"` 면 무조건 부족** |
-| 〃 | `assess(state) -> dict` | 노드. 규칙 통과 셀만 `llm("judge")` + `prompts/sufficiency_judge.md` 로 "근거가 주장을 실제로 받치는가" 판정 (Pydantic structured output). 결과를 `sufficiency` 에 기록만 — **`next` 는 쓰지 않는다** |
+| `graph/sufficiency.py` | `check_rules(state) -> dict[cell, CellVerdict]` | **결정론 층.** 8셀(관점 × 기술)마다 아래 「충분성 기준」. 실패하면 Judge 를 부르지 않는다 |
+| 〃 | `assess(state) -> dict` | 노드. 규칙 통과 셀만 `llm("judge")` + `prompts/sufficiency_judge.md` 로 4기준 판정 (Pydantic structured output). 결과를 `sufficiency` 에 기록만 — **`next` 는 쓰지 않는다**. 재판정은 방금 실행된 워커의 셀만(재작업이면 그 기술만), Judge 호출 실패 시 규칙 판정만 남긴다 |
 | `graph/observe.py` | `new_trace_id()` · `log_decision(state, node, decision, reason)` | 결정 로그를 `outputs/decisions.jsonl` + LangSmith run metadata 로 외부 적재. `{trace_id, node, decision, reason, ts}` |
 | `agents/tech_research.py` | `run(state)` | `rework_request` 가 자기 것이면 **해당 기술만** `hint_query` 로 보강 검색 |
 | `rag/rag_node.py` | `ask()` | `retrieval_log` 를 State 대신 `outputs/retrieval_log.jsonl` (trace_id 포함) 로 — 지속성 비용 |
 
-**판단 기준**: 셀 하나 = `"market:InfiniGen"` 처럼 `"{worker}:{tech}"`. 지난 실행에서 InfiniGen 시장이 "근거 없음"이었으니 규칙대로면 재작업이 자연스럽게 걸린다 — 일부러 기준을 낮추지 않는다.
+**충분성 기준** — 셀 하나 = `"market:InfiniGen"` 처럼 `"{worker}:{tech}"`. 위에서부터 처음 걸리는 항목의 `gap` 으로 부족 판정.
+원칙: **공통 기준 하나 + 자료 구조가 달라서 공통 기준이 성립하지 않는 곳만 예외.** 숫자는 데이터에 맞추지 않고 설명 가능한 원칙으로 정한 뒤, 데이터로는 이상 동작만 확인한다.
+
+| 기준 | 적용 | 값 | `gap` | 근거 |
+|---|---|---|---|---|
+| 워커 실패 | 전 관점 | `node_status == "failed"` 또는 safe fallback | `failed` | 실패 기록은 근거가 아니다 |
+| 등급 과반이 "근거 없음" | 시장 · 이해관계자 · 도메인 | 하위 항목 과반 | `no_evidence` | — |
+| 근거 건수 | 전 관점 | `[논문]` · `[웹]` **≥3** (`[추론]` · Faithfulness 미통과 메모 제외) | `evidence` | 출처 없는 문장은 근거가 아니다 (#64 리뷰) |
+| 반대 근거 | 시장 · 이해관계자 · 도메인 | **≥2** | `negatives` | RAG 확증편향 방지 장치 7 그대로. 질은 Judge 기준 3 |
+| 출처 다양성 | 시장 · 이해관계자 (웹만 쓰는 관점) | 출처 **≥2곳**, 한 출처가 **과반(>50%)이면 부족** | `source_bias` | 단일 출처 편중 = 확증편향 (노션 「편향 통제」) |
+| 웹 반례 | 도메인 | `[웹]` 근거 **≥1** | `counter_example` | 도메인 = 논문 사실 추출 + 웹 반례 (RAG 설계서 4.4 · `domain.yaml`) |
+| 수치 · 한계 | 기술 조사 | 수치 ≥1 · 한계 ≥1 (한계가 반대 근거 역할) | `numbers` · `limitations` | 검색 대상이 그 기술 논문 1편 → **출처 다양성은 보지 않는다** |
+| LLM Judge (규칙 통과 셀만) | 전 관점 | ① 주장↔근거 대응 ② 관점 적합성 ③ 반대 근거의 실질 ④ 우열 판정 없음 | `unsupported` · `off_topic` · `negatives` · `bias` | 형식은 규칙이, 내용은 Judge 가 |
+
+지난 RAG 제출 실행 데이터로 확인: 8셀 중 부족 5셀 (시장 InfiniGen github 88% · 이해관계자 KIVI 자기 논문 75% · 이해관계자 InfiniGen 근거 없음 · 도메인 KIVI 웹 반례 0 · 시장 KIVI Judge off_topic).
+일부러 기준을 낮추거나 올리지 않는다 — 첫 실제 통합 실행 뒤 **오판정이 있을 때만** 한 번 조정하고, 바꾸면 README Lessons Learned 에 한 줄.
 
 ### B 심준용 — 시장 · 이해관계자 재작업, 보고서, 실증 자료
 
