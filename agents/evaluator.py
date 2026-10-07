@@ -29,6 +29,7 @@ URL_RE = re.compile(r"https?://[^\s\]\)>]+")
 ARXIV_RE = re.compile(r"\b\d{4}\.\d{4,5}(?=v\d+\b|\b)")   # 2402.02750 · 2402.02750v2 → 2402.02750
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+ABSENCE_RE = re.compile(r"^(?:[^:\[\]]{1,20}:\s*)?근거 없음\.?$")   # "근거 없음" · "채택: 근거 없음" (#127 렌더링)
 NON_CLAIM_PREFIXES = ("판단에 필요한 추가 확인 항목",)   # 5장의 확인 필요 목록 — 판단이 아니라 다음 할 일
 TECH_HEADER_RE = re.compile(r"^(?:-\s*)?\*\*(?:KIVI|InfiniGen)\*\*\s*[—:-]")
 DIRECT_RECOMMENDATION_RE = re.compile(
@@ -69,6 +70,7 @@ class Claim(NamedTuple):
     text: str
     worker: str | None   # 이 문장이 놓인 절의 원천 워커 (3장·4.x). SUMMARY · 5장은 None
     tech: str | None
+    rendered: bool = False   # 4장 — report_render 가 워커 State 를 그대로 옮긴 문장. 보고서 재작성으로는 안 바뀐다
 
 
 def _item(passed: bool, score: float, reason: str) -> EvalItem:
@@ -105,7 +107,7 @@ def claim_records(markdown: str) -> list[Claim]:
     """SUMMARY·3·4·5장의 판단 문장을 절(워커)·기술 문맥과 함께 재현 가능하게 추출한다."""
     body, _ = _split_reference(markdown)
     records: list[Claim] = []
-    include = fenced = False
+    include = fenced = rendered = False
     worker: str | None = None
     tech: str | None = None
     for raw in body.splitlines():
@@ -118,6 +120,7 @@ def claim_records(markdown: str) -> list[Claim]:
             title = raw[3:].strip()
             include = title == "SUMMARY" or title.startswith(("3.", "4.", "5."))
             worker, tech = ("tech_research" if title.startswith("3.") else None), None
+            rendered = title.startswith("4.")
             continue
         if not include:
             continue
@@ -138,10 +141,10 @@ def claim_records(markdown: str) -> list[Claim]:
             continue
         if not plain or plain.endswith(":") or plain.startswith(("confidence:", "판정:", "긍정:", "부정:")):
             continue
-        if "공개 정보 기반 추정이다" in plain or plain == "근거 없음":   # 근거 없음 = 없다는 기록 (판단 아님)
+        if "공개 정보 기반 추정이다" in plain or ABSENCE_RE.match(plain):   # 근거 없음 = 없다는 기록 (판단 아님)
             continue
         records.extend(
-            Claim(part, worker, tech or _mentioned_tech(part))
+            Claim(part, worker, tech or _mentioned_tech(part), rendered)
             for part in _sentences(line) if not part.startswith(NON_CLAIM_PREFIXES)
         )
     return records
@@ -226,6 +229,18 @@ def _citation_correspondence(markdown: str) -> tuple[bool, str]:
 
 
 def groundedness(markdown: str) -> EvalItem:
+    return _groundedness(markdown)[0]
+
+
+def _fix_target(claim: Claim) -> str:
+    """이 문장을 고칠 수 있는 곳. 4장은 워커 출력을 옮긴 것이라 그 셀의 워커, 나머지 장은 보고서."""
+    if claim.rendered and claim.worker in WORKER_KEYS and claim.tech in TECHS:
+        return f"{claim.worker}:{claim.tech}"
+    return "report"
+
+
+def _groundedness(markdown: str) -> tuple[EvalItem, list[str]]:
+    """(판정, target). 태그 없음 · 추론 단독 문장이 있는 셀을 많은 순으로, 보고서 장 문제 · REFERENCE 불일치는 report."""
     total, tagged, inference_only, tagged_ratio, inference_ratio = _tag_stats(markdown)
     refs_ok, refs_reason = _citation_correspondence(markdown)
     passed = bool(total) and tagged_ratio >= MIN_TAGGED_RATIO and inference_ratio <= MAX_INFERENCE_RATIO and refs_ok
@@ -234,7 +249,19 @@ def groundedness(markdown: str) -> EvalItem:
         f"판단 문장 태그 {tagged}/{total}({tagged_ratio:.0%}) · "
         f"추론 단독 {inference_only}/{total}({inference_ratio:.0%}) · {refs_reason}"
     )
-    return _item(passed, score, reason)
+    if passed:
+        return _item(passed, score, reason), []
+
+    weak = Counter(
+        _fix_target(claim) for claim in claim_records(markdown)
+        if _source_kinds(claim.text) <= {"추론"}                  # 태그 없음 또는 추론 단독
+    )
+    if weak:
+        reason += " · 문제 문장 위치: " + ", ".join(f"{t} {n}건" for t, n in weak.most_common())
+    targets = [t for t, _ in weak.most_common()]
+    if not refs_ok or not targets:                                # REFERENCE 대응은 보고서 · 렌더러 쪽
+        targets.append("report")
+    return _item(passed, score, reason), targets
 
 
 def neutrality(markdown: str) -> EvalItem:
@@ -351,18 +378,19 @@ def _order_targets(targets: list[str]) -> list[str]:
 
 def evaluate(markdown: str, state: GraphState) -> EvalResult:
     """1층 규칙 평가. LLM 없이 네 항목을 모두 채운다."""
+    groundedness_item, groundedness_targets = _groundedness(markdown)
     bias_item, bias_targets = _bias(state)
     coverage_item, coverage_targets = _coverage(markdown, state)
     items = {
-        "groundedness": groundedness(markdown),
+        "groundedness": groundedness_item,
         "neutrality": neutrality(markdown),
         "bias": bias_item,
         "coverage": coverage_item,
     }
     failed = [name for name, item in items.items() if not item["passed"]]
-    # 본문 표현 문제(groundedness · neutrality)는 report, 근거 부족(bias · coverage)은 해당 셀 워커
-    targets = [*bias_targets, *coverage_targets]
-    if not items["groundedness"]["passed"] or not items["neutrality"]["passed"]:
+    # 고칠 수 있는 곳으로 — 보고서 장 표현은 report, 4장 문장 · 근거 부족(bias · coverage)은 해당 셀 워커
+    targets = [*groundedness_targets, *bias_targets, *coverage_targets]
+    if not items["neutrality"]["passed"]:
         targets.append("report")
     return {
         "passed": not failed,
@@ -510,7 +538,8 @@ def judge(markdown: str, state: GraphState, rule_result: EvalResult) -> tuple[Ev
         if weak:
             for claim, j in weak:
                 # 표현이 근거보다 강하면 보고서 수정, 근거 자체가 없으면 그 셀의 워커 재조사
-                target = _claim_target(claim) if j.problem == "unsupported" else "report"
+                # 근거가 없으면 원천 셀 재조사. 표현이 과하면 고칠 수 있는 곳 — 4장은 워커, 나머지 장은 보고서
+                target = _claim_target(claim) if j.problem == "unsupported" else _fix_target(claim)
                 targets.append(target)
                 label = "근거보다 강한 주장" if j.problem == "overstated" else "근거 없는 단정"
                 notes.append(f"groundedness: {_quote(claim.text)} {label} — {j.feedback} (→ {target})")
