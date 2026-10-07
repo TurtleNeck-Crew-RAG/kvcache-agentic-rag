@@ -1,5 +1,7 @@
 <!-- 제목: [FEAT] 이해관계자 워커 — 찬반 각 2건 강제  (이슈 제목과 맞추기) -->
 
+> **base 브랜치가 `agent-supervisor` 인지 확인하세요.** `main` 은 RAG 제출본으로 동결입니다.
+
 ## 관련 이슈
 - closes #
 
@@ -19,10 +21,10 @@
 ## 건드린 디렉토리
 수정한 곳에 체크해주세요. **자기 파트만 체크되어야 정상입니다.**
 
-- [ ] `rag/` &nbsp;/&nbsp; `agents/tech_research.py` &nbsp;/&nbsp; `experiments/` &nbsp;/&nbsp; `prompts/rag_*.md` `tech_research.md` — **A** 박유진
-- [ ] `agents/market.py` &nbsp;/&nbsp; `agents/stakeholder.py` &nbsp;/&nbsp; `prompts/market.md` `stakeholder.md` &nbsp;/&nbsp; `prompts/rubrics/4.2` `4.3` — **B** 심준용
-- [ ] `agents/domain.py` &nbsp;/&nbsp; `agents/synthesis.py` &nbsp;/&nbsp; `prompts/domain.md` `synthesis.md` `neutrality_judge.md` &nbsp;/&nbsp; `prompts/rubrics/4.1` `4.4` `4.5` — **C** 민영은
-- [ ] `graph/` &nbsp;/&nbsp; `agents/report.py` &nbsp;/&nbsp; `app.py` &nbsp;/&nbsp; `prompts/report.md` — **D** 황재원
+- [ ] `graph/sufficiency.py` `observe.py` &nbsp;/&nbsp; `rag/` &nbsp;/&nbsp; `agents/tech_research.py` &nbsp;/&nbsp; `experiments/` &nbsp;/&nbsp; `prompts/sufficiency_judge.md` `rag_*.md` `tech_research.md` — **A** 박유진
+- [ ] `agents/market.py` `stakeholder.py` `report.py` `report_render.py` &nbsp;/&nbsp; `prompts/market.md` `stakeholder.md` `report.md` &nbsp;/&nbsp; `prompts/rubrics/4.2` `4.3` &nbsp;/&nbsp; `docs/tracing/` — **B** 심준용
+- [ ] `agents/evaluator.py` `domain.py` `synthesis.py` &nbsp;/&nbsp; `prompts/evaluator.md` `domain.md` `synthesis.md` `neutrality_judge.md` &nbsp;/&nbsp; `prompts/rubrics/4.1` `4.4` `4.5` — **C** 민영은
+- [ ] `graph/supervisor.py` `state.py` `build.py` `safe.py` &nbsp;/&nbsp; `app.py` — **D** 황재원
 - [ ] `graph/state.py` ← 체크되면 **키 이름·타입이 바뀐 것이니 슬랙에 알리세요** (모든 워커가 의존)
 - [ ] `agents/_common.py` &nbsp;/&nbsp; `config/` &nbsp;/&nbsp; `pyproject.toml` &nbsp;/&nbsp; `.env.example` &nbsp;/&nbsp; CI (공용)
 - [ ] `tests/fixtures/` (예시 State — 형식이 바뀌면 함께 갱신)
@@ -69,6 +71,7 @@
 - [ ] 두 기술을 같은 프롬프트에 넣지 않았습니다. (`for tech in TECHS`)
 - [ ] 판정 문장에 `[논문 p.N]` / `[웹 URL]` / `[추론]` 태그가 있습니다.
 - [ ] 우열·추천 표현("더 낫다", "권장", "선택해야")을 쓰지 않았습니다.
-- [ ] 워커는 자기 출력 키 + `citations` + `llm_calls`(+`retrieval_log`) 만 반환합니다.
+- [ ] 워커는 자기 출력 키 + `citations` + `llm_calls` 만 반환합니다. (`next` · `retry` · `sufficiency` · `eval_result` 는 게이트 전용)
+- [ ] Judge 노드(`assess` · `evaluator`)는 판정만 기록하고 다음 노드를 정하지 않습니다.
 - [ ] `data/papers/*.pdf`, `data/index/`, `.env` 를 커밋하지 않았습니다.
 - [ ] 남의 디렉토리를 고치지 않았습니다.

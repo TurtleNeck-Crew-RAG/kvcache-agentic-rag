@@ -1,210 +1,231 @@
-# 파트 분담 · 시작 가이드
+# 파트 분담 · 시작 가이드 — Agent 과제 (Multi-Agent Orchestration)
 
-> 이 문서 하나 읽고 바로 개발 시작할 수 있게 썼습니다. 규칙 상세는 [CONTRIBUTING.md](../CONTRIBUTING.md), 설계 근거는 [설계서.md](설계서.md).
+> 브랜치 `agent-supervisor` 기준 문서입니다. RAG 과제 분담은 `main` 의 같은 파일에 그대로 있습니다.
+> 규칙 상세는 [CONTRIBUTING.md](../CONTRIBUTING.md), 명세 정본은 강사 노션 「Multi-Agent Orchestration」(충돌하면 노션이 이김).
 >
-> **마감: DAY 3 15시** — GitHub 링크 + `RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf` (슬랙 스레드).
-> 발표는 README 로만 10분 — 차별점 · 보고서 핵심 · Lessons Learned.
+> **마감: DAY 2 (2026-10-07) 퇴근 전** — Slack 반별 스레드에 Git 링크 + `tracing-N.png` + 보고서 PDF,
+> 파일은 `Agent_판교_10반_박유진+황재원+민영은+심준용.zip`
 
 ---
 
-## 0. 시작 5분 (전원)
+## 0. 무엇을 바꾸나 — 한 장 요약
 
-```bash
-git clone https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag.git
-cd kvcache-agentic-rag
-uv sync --group dev                 # Python 3.11 .venv (torch 포함이라 몇 분)
-cp .env.example .env                # OPENAI_API_KEY · TAVILY_API_KEY · LANGSMITH_API_KEY 채우기
-bash scripts/fetch_papers.sh        # data/papers/kivi.pdf · infinigen.pdf (커밋 안 함)
-uv run pytest                       # 5개 통과하면 환경 OK
+RAG 과제의 Dispatcher 는 허브 구조였지만 **규칙 1 → 2 → 3 → 4 순서가 코드에 고정**돼 있었다.
+노션 필수 항목("순서 하드코딩 금지 · 스텝 수 고정 금지 · 근거 충분성 평가 후 보고서 · 부족하면 해당 하위에 재작업")을
+맞추려면 **Supervisor 가 State 의 부족분을 보고 매 턴 다음 담당 1명을 고르는** 구조로 바꿔야 한다.
+
+### 패턴: Supervisor (Hybrid 판정 + 결정론 게이트)
+
+```
+START → supervisor ──route()──┬─ tech_research ─┐
+          ▲                   ├─ market ────────┤
+          │                   ├─ stakeholder ───┼─→ assess ──┐   (충분성: 규칙 → LLM Judge)
+          │                   ├─ domain ────────┘            │
+          │                   ├─ synthesis ──────────────────┤
+          │                   ├─ report ─→ evaluator ────────┤   (품질: 규칙 → LLM Judge)
+          │                   ├─ end_with_warning → END      │
+          │                   └─ END                         │
+          └──────────────────────────────────────────────────┘
 ```
 
-그 다음:
-1. GitHub 이슈 생성 (아래 **5. 초기 이슈** 표에서 자기 것 골라 템플릿으로) → 번호 확인
-2. `git switch -c feat/<번호>-<slug>` (예: `feat/6-stakeholder-worker`)
-3. 자기 파일 열어서 `NotImplementedError` 지우고 구현
-4. `tests/fixtures/` 로 단독 실행해 보고 → PR
+| 층 | 노드 | 하는 일 | 성격 |
+|---|---|---|---|
+| 판정 (Judge) | `assess` · `evaluator` | **규칙 검사가 먼저 거르고, 통과한 것만 LLM Judge** — 결과를 State 에 기록만 한다 | 확률 (LLM) |
+| 게이트 (Gate) | `supervisor` + `route()` | State 의 판정 결과 · 시도 횟수 · 상한만 보고 `next` 를 정한다. **LLM 없음, 순수 함수** | 결정론 |
+| 실행 | 워커 6개 | 자기 출력 키만 쓴다. 워커끼리 직접 통신 없음 — 전부 Supervisor 층으로 복귀 | — |
+
+- **판정과 게이트를 물리적으로 다른 노드로 둔다** — 교안 부록 B "판정은 확률에, 게이트는 결정론으로" ·
+  "`judge_node` → `gate()`" · "결정론 층이 먼저 거르고 통과된 것만 Judge 로". 수업 노트북 `07-Supervisor-Advanced` 의
+  `RelevanceChecker → Supervisor` 구조와 같다.
+- **매 턴 워커 1명** — 교안 p.71 · p.123: Supervisor 는 "State 기준으로 1개씩 순차 호출". RAG 때의 3개 병렬 fan-out 은 없앤다.
+- **종료는 코드가 강제** — `max_steps` · 셀별 재작업 ≤2 · 평가 루프 ≤2 · `LLM_BUDGET` · `recursion_limit` (교안 p.167).
+
+### 실무 관점 — 이 설계는 Workflow 인가 Agent 인가
+
+교안 p.57: **Workflow**(코드가 경로 통제) ↔ **AI Agentic Workflow**(고정된 바깥 구조 + 그 안에서 모델의 자율 선택) ↔ **Agent**(모델이 런타임 흐름 결정).
+"Production 에서는 Agent 보다 Workflow 비중이 높다" · "Agent ≠ Loop — 루프가 있어도 구조가 코드로 고정이면 Workflow" ·
+"Enterprise 는 Hybrid, Guardrailed Agent" (p.10–11).
+
+우리 설계는 **AI Agentic Workflow (Guardrailed)** 에 둔다.
+
+| 코드가 고정하는 것 (Workflow 골격 · Harness) | 모델이 런타임에 정하는 것 (Agentic) |
+|---|---|
+| 그래프 토폴로지(허브), 4관점 × 2기술 = 8셀, 보고서 뒤 평가 노드 | 셀별 **근거 충분 여부** → 어느 워커가 몇 번 재작업될지 |
+| 규칙 검사 기준(건수 · 반대 근거 · 출처 다양성 · 실패 기록) | 재작업 때 던질 **보강 질의**(`hint_query`) |
+| 게이트 규칙과 모든 상한 | 보고서 미달 사유 → 보고서 재작성인지, 특정 관점 재조사인지 |
+
+⚠️ 규칙만으로 라우팅하면 "Agent ≠ Loop" 기준에 따라 **그냥 Workflow** 로 읽힌다. LLM 충분성 Judge 가 있어야
+"Supervisor 가 충분한가를 스스로 판단"(p.70 Supervisor vs Router)이 성립한다. 그래서 충분성은 **Hybrid** 다.
 
 ---
 
 ## 1. 누가 무엇을
 
-| | 이름 | 한 줄 | 소유 파일 | 설계서 |
-|---|---|---|---|---|
-| **A** | 박유진 | RAG 파이프라인 + 기술 조사 | `rag/*` · `agents/tech_research.py` · `prompts/tech_research.md` `rag_*.md` · `experiments/` | 1.3 · 3.4 · 3.5 · 3.7 · 5.4 |
-| **B** | 심준용 | 시장 · 이해관계자 (웹검색) | `agents/market.py` `stakeholder.py` · `prompts/market.md` `stakeholder.md` · `prompts/rubrics/4.2-market.md` `4.3-stakeholder.md` | 1.1 · 1.2 · 1.4 · 4.2 · 4.3 |
-| **C** | 민영은 | 도메인 · 종합 · 중립성 | `agents/domain.py` `synthesis.py` · `prompts/domain.md` `synthesis.md` `neutrality_judge.md` · `prompts/rubrics/4.1-trl.md` `4.4-domain.md` `4.5-synthesis.md` | 0 · 4.1 · 4.4 · 4.5 · 5.5 |
-| **D** | 황재원 | State · Graph · 보고서 · 발표 | `graph/*` · `agents/report.py` · `app.py` · `prompts/report.md` · `outputs/report/` · README 취합 | 5 · 6 |
+| | 이름 | 한 줄 | 소유 파일 |
+|---|---|---|---|
+| **A** | 박유진 | 충분성 판정 · 관측성 · 기술 조사 | `graph/sufficiency.py` · `graph/observe.py` · `prompts/sufficiency_judge.md` · `rag/*` · `agents/tech_research.py` · `prompts/tech_research.md` `rag_*.md` · `experiments/` |
+| **B** | 심준용 | 시장 · 이해관계자 · 보고서 · 실증 자료 | `agents/market.py` `stakeholder.py` `report.py` `report_render.py` · `prompts/market.md` `stakeholder.md` `report.md` · `prompts/rubrics/4.2` `4.3` · `outputs/report/` · `docs/tracing/` |
+| **C** | 민영은 | 품질 평가 노드 · 도메인 · 종합 | `agents/evaluator.py` · `prompts/evaluator.md` · `agents/domain.py` `synthesis.py` · `prompts/domain.md` `synthesis.md` `neutrality_judge.md` · `prompts/rubrics/4.1` `4.4` `4.5` |
+| **D** | 황재원 | Supervisor · State · Graph · 통합 | `graph/supervisor.py` `state.py` `build.py` `safe.py` · `app.py` · README 취합 |
 
 공용 (바꾸기 전에 슬랙): `agents/_common.py` · `config/` · `scripts/` · `pyproject.toml` · CI · `tests/fixtures/`
 
----
-
-## 2. 파트별 — 오늘 할 일
-
-### A 박유진 — `rag/` · `agents/tech_research.py`
-
-**만들 것**
-
-| 파일 | 함수 | 하는 일 | 설계서 |
-|---|---|---|---|
-| `rag/indexing.py` | `build_index()` | PyMuPDFLoader → Recursive 600/100 (metadata `chunk_id` · `tech` · `page`) → BGE-M3 + `CacheBackedEmbeddings`(`data/cache/`) → Chroma(`data/index/`) + sparse | 3.4, 그림 1(a) |
-| `rag/retriever.py` | `get_retriever(tech)` | Ensemble sparse+dense 0.5/0.5, k=4, `tech` 필터 | 3.4 |
-| `rag/judge.py` | `check_relevance` · `rewrite_query` · `check_faithfulness` | Judge 1 (yes/no) · 재작성 · Judge 2 | 3.7, 그림 1(b)(c) |
-| `rag/rag_node.py` | **`ask(tech, question, node)`** | 위 셋을 묶은 공용 루틴 — **C 도 이걸 씀** | 5.4 |
-| `agents/tech_research.py` | `run(state)` | 고정 질문 5 × `for tech in TECHS` → `ask()` → `tech_summary` | 2장 |
-| `rag/evaluate.py` | `main()` | Hit@4 · MRR@4 (20문항) · RAGAS 3종 → README | 3.4 |
-
-**`ask()` 반환 형식** (C 와의 약속)
-```python
-{
-  "answer": "...[p.4]...",                      # 컨텍스트 없으면 "논문에 근거 없음"
-  "evidence": [{"claim": "...", "tag": "논문", "ref": "2402.02750", "page": 4}],
-  "retrieval_entry": {...},                      # graph.state.RetrievalEntry — 재작성 전/후 둘 다
-  "llm_calls": 2,                                # generator 1 + judge 1 (+ rewrite 1)
-}
-```
-
-**순서**: `indexing` → `retriever` → **`ask()` 시그니처만이라도 먼저 PR** (C 가 기다림) → judge 채우기 → `tech_research` → 실측.
-**실측 이슈**: 같은 20문항(`experiments/embed_compare/eval_set.json`)으로 BGE-M3 sparse vs BM25 → Hit@4 ≥ 0.80 인지. 미달이면 chunk 1000 / parent-document 재측정 (3.5 해석 5).
-
-### B 심준용 — `agents/market.py` · `agents/stakeholder.py`
-
-**입력** `state["tech_summary"]` (없으면 `tests/fixtures/tech_summary.json`) · **도구** Tavily · **출력** `market_eval[tech]`, `stakeholder_eval[tech]` (`graph.state.Eval`)
-
-```python
-from agents._common import TECHS, llm, load_prompt
-from langchain_tavily import TavilySearch
-
-def run(state):
-    out, cites, calls = {}, [], 0
-    for tech in TECHS:                                    # 기술별 독립 호출
-        summary = state["tech_summary"][tech]
-        # 1) Tavily 검색 (질의 3~5개: 시장 규모 · 채택 · 생태계 / 이해관계자는 찬·반 각각)
-        # 2) llm("generator") + load_prompt("market") + load_prompt("rubrics/4.2-market")
-        #    → structured output 으로 Eval 채우기. 모든 evidence 에 [웹 URL] 태그
-        out[tech] = ...
-        cites += [...]                                    # graph.state.Ref
-        calls += 1
-    return {"market_eval": out, "citations": cites, "llm_calls": calls}
-```
-
-**stakeholder 만의 규칙** (Dispatcher 규칙 2'): `negatives` 가 기술당 **2건 미만이면 재호출**됩니다. `state["retry"].get("stake", 0) > 0` 이면 "반대 근거만 검색" 모드로 프롬프트를 바꾸세요. 2회 후에도 못 채우면 `negatives` 에 `"반대 근거 확보 실패 [추론]"` 을 넣어 기록.
-**먼저 할 것**: `prompts/rubrics/4.2-market.md` · `4.3-stakeholder.md` 에 설계서 4.2 · 4.3 표를 옮기기 → 이게 프롬프트의 절반.
-
-### C 민영은 — `agents/domain.py` · `agents/synthesis.py`
-
-**domain** — 2단계 (설계서 4.4)
-1. **사실 추출** (RAG): 도메인 질문 5개를 `rag.rag_node.ask(tech, q, node="domain")` 으로. 질문에 **"온디바이스"·"적합" 단어 금지** (장치 3) — 예: "실험에 사용된 메모리 대역폭은?" O / "온디바이스에 적합한가?" X
-2. **판정**: 1단계 답 + `config/domain.yaml` 제약 → `DomainEval` (`verdict` 적합/조건부/부적합, `axes` 3축에서 포기한 것). 정확도에 임계값 없음 — 수치는 보고만
-3. HW 우호 반례(`domain.yaml` 의 `counter_examples`: LLM in a flash · LPDDR-PIM) 는 **Tavily 로 직접** 검색. 다른 워커 결과는 받지 않음
-
-A 의 `ask()` 가 아직 없으면 → 2단계 판정 프롬프트 + 반례 웹검색부터. `ask()` 자리엔 fixtures 의 `tech_summary` 로 임시.
-
-**synthesis** — 입력 `*_eval` 3개 + `tech_summary` (없으면 `tests/fixtures/evals.json`)
-- 관점(TRL · 시장 · 이해관계자 · 도메인) × 기술 매트릭스, `agreements[]`, `conflicts[]` — **conflicts 가 보고서 5장의 본체**
-- `trl_estimate[tech]` = `{level, basis[], reference_date}` (4.1 Rubric, 기준 시점 명시)
-- **중립성 Judge**: `llm("judge")` + `prompts/neutrality_judge.md` 로 우열·추천 표현 탐지 → `neutrality = {"result": "pass"|"fail", "violations": [...]}`. fail 이면 Dispatcher 가 재호출 (≤2). `retry["synth"] > 0` 이면 violations 를 프롬프트에 넣어 고치게
-- 반환: `{"synthesis", "trl_estimate", "neutrality", "llm_calls"}`
-
-**먼저 할 것**: `prompts/rubrics/4.1-trl.md` `4.4-domain.md` `4.5-synthesis.md` 옮기기, 도메인 1단계 질문 5개 확정.
-
-### D 황재원 — `graph/` · `agents/report.py` · `app.py`
-
-**이미 있음**: `graph/state.py`(5.2 표 그대로) · `graph/dispatcher.py`(5.3 규칙표) · `graph/build.py` · `tests/test_dispatcher.py` 5개 통과.
-**첫 PR (오전 1시간 안)**: `state.py` 를 훑고 확정 — 키 이름·타입에 이견 있으면 지금 바꾸고 슬랙 공지. 이후 변경은 이슈로.
-
-**report** — 입력 `synthesis` · `trl_estimate` · `*_eval` · `tech_summary` · `citations` · `retrieval_log` (없으면 fixtures)
-- 설계서 6장 목차 그대로: SUMMARY(½p) → 1 배경 → 2 선정(`config/selection.yaml`) → 3 개요(`tech_summary`) → 4 관점별(각 관점 안에서 KIVI · InfiniGen 나란히) → 5 시사점(`conflicts`) → 6 한계점(6항목 — `[추론]` 비율 · Hit@4 · 재작성 효과는 `retrieval_log` 에서 계산) → REFERENCE
-- REFERENCE: `citations` 중 **본문에 인용된 것만**, 6장 표기 형식으로 렌더링 (논문/특허/웹)
-- 장별로 LLM 호출을 나누면 (SUMMARY 는 마지막) 컨텍스트가 안 터짐. `neutrality.violations` 가 남아 있으면 6장에 표시
-- md → PDF: `uv sync --extra pdf` (weasyprint, `brew install pango`) 안 되면 VS Code Markdown PDF 로 수동. 파일명 `RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf`
-
-**app.py**: 이미 뼈대 있음. 인덱스 없으면 `build_index()` 호출, LangSmith 프로젝트 `kv-cache-eval` 확인, 오후 첫 통합 실행에서 어디서 깨지는지 잡는 게 D 의 일.
+> RAG 때와 바뀐 점: `agents/report.py` 가 D → **B** 로 이동 (D 가 Supervisor · State · 체크포인터를 다 맡아서).
+> `graph/dispatcher.py` 는 `graph/supervisor.py` 로 대체되고 삭제된다 (D).
 
 ---
 
-## 3. 의존 그래프 — 누가 누구를 기다리나
+## 2. 파트별 할 일
+
+### A 박유진 — 충분성 판정 (`assess` 노드) · 관측성 · 기술 조사
+
+| 파일 | 함수 | 하는 일 |
+|---|---|---|
+| `graph/sufficiency.py` | `check_rules(state) -> dict[cell, RuleResult]` | **결정론 층.** 8셀(관점 × 기술)마다 evidence ≥3 · 출처 종류 ≥2 · 반대 근거 ≥2 · `grade == "근거 없음"` 아님 · **`node_status[worker] == "failed"` 면 무조건 부족** |
+| 〃 | `assess(state) -> dict` | 노드. 규칙 통과 셀만 `llm("judge")` + `prompts/sufficiency_judge.md` 로 "근거가 주장을 실제로 받치는가" 판정 (Pydantic structured output). 결과를 `sufficiency` 에 기록만 — **`next` 는 쓰지 않는다** |
+| `graph/observe.py` | `new_trace_id()` · `log_decision(state, node, decision, reason)` | 결정 로그를 `outputs/decisions.jsonl` + LangSmith run metadata 로 외부 적재. `{trace_id, node, decision, reason, ts}` |
+| `agents/tech_research.py` | `run(state)` | `rework_request` 가 자기 것이면 **해당 기술만** `hint_query` 로 보강 검색 |
+| `rag/rag_node.py` | `ask()` | `retrieval_log` 를 State 대신 `outputs/retrieval_log.jsonl` (trace_id 포함) 로 — 지속성 비용 |
+
+**판단 기준**: 셀 하나 = `"market:InfiniGen"` 처럼 `"{worker}:{tech}"`. 지난 실행에서 InfiniGen 시장이 "근거 없음"이었으니 규칙대로면 재작업이 자연스럽게 걸린다 — 일부러 기준을 낮추지 않는다.
+
+### B 심준용 — 시장 · 이해관계자 재작업, 보고서, 실증 자료
+
+- `market.py` · `stakeholder.py`: `rework_request = {worker, tech, gap, hint_query}` 가 자기 것이면 **그 기술만** 다시 돌려 반환 (`*_eval` 은 기술 단위 병합 reducer 라 다른 기술 결과는 남는다). 기존 "반대 근거만 검색" 모드는 `gap == "negatives"` 로 흡수
+- `report.py`: `eval_result.feedback` 이 있으면 반영해 재작성. 본문은 `outputs/report/report.md` 로 쓰고 State 에는 **`report_uri` 만** 반환. **A4 10장 이하** — 넘으면 4장 관점별 서술을 줄인다. SUMMARY · REFERENCE 필수
+- 실증: LangSmith 에서 **재작업 · 평가 루프가 한 번 이상 찍힌 실행**을 골라 `docs/tracing/tracing-1.png` 부터 캡처. README Run Record 표 갱신
+
+### C 민영은 — 품질 평가 노드 (`evaluator`) · 도메인 · 종합
+
+- `agents/evaluator.py` — 보고서 **뒤**. 노션 4항목, 방식은 3안 Hybrid:
+
+  | 항목 | 규칙 (먼저) | LLM Judge (규칙 통과 시) |
+  |---|---|---|
+  | Groundedness | 판단 문장 출처 태그 비율 · `[추론]` ≤10% · REFERENCE ↔ 본문 인용 대응 | 주장 샘플 ↔ evidence 대조 |
+  | 중립성 | 금지어("더 낫다" · "권장" · "선택해야" · "우수") | 우열 판정 문맥인지 |
+  | 편향 통제 | 단일 출처 비중 ≤40% · 셀별 반대 근거 존재 | — |
+  | 관점 커버리지 | 4관점 × 2기술 섹션 · SUMMARY · REFERENCE 존재 | — |
+
+  결과는 `eval_result` 에 **기록만** — 다음 경로는 D 의 게이트가 정한다. 실패 항목마다 `target`(`"report"` 또는 `"{worker}:{tech}"`)과 `feedback` 을 남긴다
+- `synthesis.py` 안 중립성 Judge 를 evaluator 로 합칠지 **오전에 결정** (합치면 중복 제거, 두면 수정량 최소)
+- `domain.py`: `rework_request` 처리 (A · B 와 같은 방식)
+
+### D 황재원 — Supervisor · State · Graph · 통합
+
+- `graph/supervisor.py`: `supervisor(state)` 노드 = **순수 함수**. `sufficiency` · `eval_result` · 시도 횟수 · 상한만 보고 `next` 1개 + `rework_request` + `step_count += 1`. 사유는 `observe.log_decision()`. `route(state)` 는 `state["next"]` 반환만
+  - 우선순위 (State 에서 계산): 상한 초과 → `end_with_warning` · 미수집 셀(선행 조건 충족한 것) → 해당 워커 · 부족 셀(재작업 <2) → 재작업 · 전부 충분/소진 → synthesis → report · 평가 fail(<2) → target · 평가 pass → END
+- `graph/state.py`: 아래 4절 계약대로 재편
+- `graph/build.py`: 토폴로지 (0절 그림) + 체크포인터(SqliteSaver, `thread_id = trace_id`)
+- `graph/safe.py`: 실패 시 `node_status[name] = "failed"` · `last_error` · `errors` 도 함께 반환 — **fallback 이 정상 결과처럼 보이지 않게** (교안 함정: except 가 오류를 삼키면 fallback 이 정상처럼 보인다)
+- `end_with_warning` 노드: 상한 소진 시 `status = "FAILED"` 대신 미달 항목을 보고서 한계점에 남기고 종료 — 트레이스에 이름으로 찍힌다
+- `app.py`: `--resume <trace_id>` 로 체크포인트 재개
+- 오전에 **강사 확인 2건**: ① Supervisor 에 LLM 이 꼭 필요한가 ② 우선순위 규칙이 "순서 하드코딩"으로 읽히는가
+
+---
+
+## 3. 의존 그래프
 
 ```
-D  state.py 확정 ──────────────┬──────────────┬──────────────┐
-                               │              │              │
-A  indexing → retriever →      │              │              │
-   judge → rag_node.ask() ─────┼──► C domain  │              │
-      │                        │      │       │              │
-      ▼                        ▼      │       ▼              │
-A  tech_research ─────────► B market  │  B stakeholder       │
-      │  (tech_summary)        │      │       │              │
-      └────────────────────────┴──────┴───────┘              │
-                               │                             │
-                               ▼                             │
-                        C synthesis + neutrality             │
-                               │                             ▼
-                               └──────────────────► D report → app.py → PDF
+D  state.py 계약 PR ──┬───────────────┬───────────────┬──────────────┐
+                      ▼               ▼               ▼              ▼
+A  sufficiency ──► D supervisor ◄── C evaluator    B 워커 재작업   A·C 워커 재작업
+   (assess)            │  (gate)        ▲
+                       ▼                │
+                    D build.py ──► B report ──┘
+                       │
+                       ▼
+                 통합 실행 → B 트레이스 캡처 → D README 취합
 ```
 
 | 기다리는 쪽 | 기다리는 것 | 막힐 때 우회 |
 |---|---|---|
-| 전원 | D `state.py` | 이미 설계서대로 들어 있음 — 확정 PR 전에도 그 키 이름으로 개발 시작 |
-| B · C | A `tech_summary` | `tests/fixtures/tech_summary.json` |
-| C domain | A `ask()` | 시그니처 먼저 머지. C 는 2단계 판정 + 반례 웹검색부터 |
-| C synthesis | 평가 3개 | `tests/fixtures/evals.json` |
-| D report | C `synthesis` · `citations` | fixtures 로 렌더링부터. 진짜 데이터는 마지막 2시간 |
+| 전원 | D `state.py` 계약 | 4절 표의 키 이름으로 먼저 개발 |
+| D supervisor | A `sufficiency` · C `eval_result` 형식 | 형식만 맞춘 stub 을 fixtures 에 |
+| B report | C `eval_result.feedback` | feedback 없는 경로부터 |
+| B 캡처 | 통합 실행 성공 | — 마감 2시간 전까지 반드시 |
 
-**병목은 A 의 `ask()` 와 D 의 `state.py`.** 둘은 오전 첫 PR.
+**병목은 D `state.py` 와 A `assess` · C `evaluator` 의 출력 형식.** 셋이 오전 첫 PR.
 
 ---
 
-## 4. 인터페이스 계약 (파트 사이 약속)
+## 4. 인터페이스 계약 — `graph/state.py` 에 이대로 들어간다
 
-| 약속 | 내용 |
+```python
+# ── 페이로드 (작업 결과) ─────────────────────────────
+domain, selected                                  # 입력
+tech_summary:     Annotated[dict[Tech, TechSummary], merge_by_tech]
+market_eval:      Annotated[dict[Tech, Eval],        merge_by_tech]
+stakeholder_eval: Annotated[dict[Tech, Eval],        merge_by_tech]
+domain_eval:      Annotated[dict[Tech, DomainEval],  merge_by_tech]
+trl_estimate, synthesis
+report_uri: str                                   # 본문은 파일 — State 는 참조만
+citations:  Annotated[list[Ref], operator.add]
+
+# ── 판정 (Judge 노드가 쓰고, Gate 가 읽는다) ────────
+sufficiency: Annotated[dict[str, CellVerdict], merge]   # "market:InfiniGen" → 아래
+eval_result: EvalResult | None
+
+# ── 제어 (Gate 만 쓴다 · safe 는 node_status/errors 만) ─
+trace_id: str                                     # = 체크포인터 thread_id = LangSmith metadata
+next: str                                         # 매 턴 1개
+rework_request: ReworkRequest | None
+step_count: Annotated[int, operator.add];  max_steps: int
+retry: Annotated[dict[str, int], merge]           # "market:InfiniGen" → 횟수
+eval_attempts: int
+llm_calls: Annotated[int, operator.add]
+status: Literal["RUNNING", "SUCCESS", "FAILED", "INTERRUPTED"]
+node_status: Annotated[dict[str, str], merge]     # worker → "ok" | "failed"
+errors: Annotated[list[ErrorRecord], operator.add]
+last_error: ErrorRecord | None                    # {node, type, message, ts}
+```
+
+| 이름 | 형식 |
 |---|---|
-| 워커 시그니처 | `run(state: GraphState) -> dict` — **자기 출력 키 + `citations` + `llm_calls`** (+RAG 면 `retrieval_log`) 만 반환. 다른 키 건드리지 않음 |
-| 기술별 독립 | `for tech in TECHS:` — 한 프롬프트에 KIVI 와 InfiniGen 을 같이 넣지 않음 (장치 2) |
-| 프롬프트 | `prompts/<worker>.md` 에 두고 `load_prompt()` 로 읽음. Rubric 은 `load_prompt("rubrics/4.x-...")` 로 include |
-| LLM | `llm("generator")` 생성 · `llm("judge")` 판정(temperature 0) · `llm("light")` 형식 변환만. 직접 `ChatOpenAI(...)` 만들지 않음 |
-| 출처 태그 | 모든 판단 문장에 `[논문 p.N]` / `[웹 URL]` / `[추론]`. `evidence[]` 에도 `tag` 필드 |
-| citations | `graph.state.Ref` 형식 `{type, authors, year, title, venue, id_or_url, accessed}` — 보고서가 6장 형식으로 렌더링 |
-| 금지 표현 | "더 낫다" · "권장" · "선택해야" · "우수" — 중립성 Judge 가 잡지만 애초에 쓰지 않음 |
-| llm_calls | LLM 을 부른 횟수를 정직하게 더함 — `> 100` 이면 Dispatcher 가 재호출을 끔 |
-| structured output | Eval · DomainEval · TechSummary 는 Pydantic 모델로 `with_structured_output` 권장 — 키 누락 방지 |
+| `CellVerdict` | `{rule: "pass"\|"fail", judge: "sufficient"\|"insufficient"\|None, gap: str, hint_query: str, reason: str}` |
+| `ReworkRequest` | `{worker, tech, gap, hint_query}` — 워커는 `worker` 가 자기 이름일 때만 읽는다 |
+| `EvalResult` | `{passed: bool, items: {groundedness, neutrality, bias, coverage: {passed, score, reason}}, targets: list[str], feedback: str}` |
+| 워커 반환 | 자기 출력 키 + `citations` + `llm_calls` 만. **`next` · `retry` · `sufficiency` · `eval_result` 는 절대 쓰지 않는다** |
+
+README State Schema 7항목과의 대응: 제어 vs 페이로드 = 위 3구역 · 관측성 = `observe.py` 외부 적재 · 지속성 = `report_uri` · `retrieval_log.jsonl` ·
+상관 = `trace_id` · 재개 = 체크포인터 + `node_status` · `last_error` · 동시 처리 = `merge_by_tech` 등 reducer · 종료 = `max_steps` · `retry` · `eval_attempts` · `LLM_BUDGET`
 
 ---
 
-## 5. 초기 이슈 — 템플릿으로 바로 만들 것
+## 5. 초기 이슈
 
-| # | 파트 | 제목 | type |
-|---|---|---|---|
-| 1 | 공용 | `[CHORE] 리포 뼈대 · 이슈/PR 템플릿 · CI` (완료) | chore |
-| 2 | D | `[FEAT] State 스키마 확정 + fixtures 검토` | feat |
-| 3 | A | `[FEAT] 인덱싱 — PyMuPDF → 600/100 → BGE-M3 캐시 → Chroma + sparse` | feat |
-| 4 | A | `[FEAT] rag_node.ask() — 하이브리드 검색 · 관련성 · 재작성 · Faithfulness` | feat |
-| 5 | B | `[FEAT] 시장 평가 워커 (Tavily · Rubric 4.2)` | feat |
-| 6 | B | `[FEAT] 이해관계자 워커 — 찬반 각 ≥2 · 반대근거 retry` | feat |
-| 7 | C | `[FEAT] 도메인 평가 워커 — 사실 추출(RAG) → 판정 · HW 반례 웹검색` | feat |
-| 8 | C | `[FEAT] 종합 워커 + 중립성 Judge · TRL` | feat |
-| 9 | A | `[FEAT] 기술 조사 워커 — 고정 질문 5 × 기술 2` | feat |
-| 10 | D | `[FEAT] 보고서 워커 — 6장 목차 · REFERENCE 렌더링 · md→PDF` | feat |
-| 11 | A | `[CHORE] 실측 — sparse M3 vs BM25 Hit@4/MRR · RAGAS` | exp |
-| 12 | D | `[CHORE] app.py 통합 실행 · README 수치 · 발표` | chore |
+| 파트 | 제목 | type |
+|---|---|---|
+| D | `[FEAT] State 계약 재편 — 제어/판정/페이로드 · trace_id · reducer` | feat |
+| D | `[FEAT] Supervisor 게이트 + route() + end_with_warning — dispatcher 대체` | feat |
+| D | `[FEAT] 체크포인터 · safe node_status · app.py --resume` | feat |
+| A | `[FEAT] assess 노드 — 충분성 규칙 → LLM Judge` | feat |
+| A | `[FEAT] observe — trace_id · 결정 로그 · retrieval_log 외부화` | feat |
+| A | `[FEAT] tech_research rework_request 처리` | feat |
+| B | `[FEAT] market · stakeholder rework_request 처리` | feat |
+| B | `[FEAT] report — feedback 반영 · report_uri · 10장` | feat |
+| C | `[FEAT] evaluator 노드 — 4항목 규칙 → LLM Judge` | feat |
+| C | `[FEAT] domain rework_request · 중립성 Judge 통합 여부` | feat |
+| B | `[DOCS] LangSmith tracing 캡처 · Run Record` | docs |
+| D | `[DOCS] README — Pattern · 동적 처리 · State Schema 7항목` | docs |
 
 ---
 
-## 6. 시간표 (하루 기준)
+## 6. 시간표 (DAY 2)
 
 | | A 박유진 | B 심준용 | C 민영은 | D 황재원 |
 |---|---|---|---|---|
-| 오전 1 | `indexing` · `retriever` | Rubric 4.2 · 4.3 → `prompts/rubrics/` | Rubric 4.1 · 4.4 · 4.5, 도메인 질문 5개 확정 | **`state.py` 확정 PR**, fixtures 검토 |
-| 오전 2 | judge · **`ask()` PR** | `market` 워커 (fixtures 입력) | `domain` 2단계 판정 · `neutrality_judge` | `report` 렌더러 (fixtures) |
-| 오후 1 | `tech_research`, sparse M3 vs BM25 실측 | `stakeholder` + 반대근거 retry | `domain` 에 진짜 `ask()` 연결 · `synthesis` | `app.py` 통합 실행 1회 — 어디서 깨지나 |
-| 오후 2 | RAGAS → README 수치 | evidence 태그 · citations 점검 | 중립성 루프 실동작 · `[추론]` 비율 | 전체 실행 → `report.md` → PDF · README · 발표 |
+| 오전 1 | **전원 30분: 4절 계약 확정** | | | |
+| 오전 2 | `check_rules` + `assess` stub PR | 워커 2개 rework 처리 | `evaluator` 규칙 층 + stub PR | **`state.py` PR** → supervisor stub · 강사 확인 |
+| 점심 직후 | **전원: 첫 통합 실행 — stub 이어도 END 까지 가는지** | | | |
+| 오후 1 | LLM Judge · `observe` | `report` feedback · 10장 | LLM Judge 층 · domain rework | 체크포인터 · `end_with_warning` |
+| 오후 2 | Retrieval 지표 README | **재작업 · 평가 루프 찍힌 실행 캡처** | 품질 평가 README | README 취합 |
+| 마감 1h 전 | **전원: PDF 10장 확인 · zip · Slack 제출** | | | |
 
 ---
 
-## 7. 자주 물을 것
+## 7. README Contributors (PM · PL 표기 금지 — 노션)
 
-- **Q. 임베딩 모델 다운로드가 느려요** — BGE-M3 2.27GB, 첫 `rag.indexing` 때 한 번. 그 전엔 B · C · D 는 fixtures 로 개발하면 됨.
-- **Q. 워커 하나만 돌려보고 싶어요** — `tests/fixtures/README.md` 의 스니펫. `app.py` 전체는 D 가 오후에.
-- **Q. State 에 키 하나 추가하고 싶어요** — `[CHORE] 설계 변경` 이슈 → D. 워커 안에서 필요한 중간값은 반환하지 말고 로컬 변수로.
-- **Q. 논문 밖 자료를 인덱싱해도 되나요** — 안 됩니다 (과제 명세 "제시된 풀"). 반례 · 시장 자료는 Tavily.
-- **Q. 설계서와 다르게 만들었어요** — PR "설계서 반영" 칸에 절 번호 + 보고서 6장 한계점 또는 README Lessons Learned 에 한 줄. 설명 없으면 "설계 구현 충실도" 감점.
-- **Q. 이슈에 설계서 근거 꼭 써야 하나요** — 필수 아님. 있으면 리뷰가 빨라짐.
+- 박유진 : 근거 충분성 판정(규칙 + LLM Judge), 관측성(trace_id · 결정 로그), 기술 조사 Agent, RAG Pipeline
+- 심준용 : 시장 · 이해관계자 Agent 재작업, 보고서 생성 Agent, LangSmith Tracing 실증
+- 민영은 : 품질 평가 노드(Groundedness · 중립성 · 편향 · 커버리지), 도메인 · 종합 Agent
+- 황재원 : Supervisor 게이트 · State Schema · Graph · 체크포인터, README 취합

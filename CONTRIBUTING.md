@@ -1,20 +1,25 @@
-# 협업 규칙
+# 협업 규칙 — Agent 과제 (`agent-supervisor` 브랜치)
 
 > 이슈 → 브랜치 → PR → 리뷰 → 머지. 예외 없이 이 순서로 갑니다.
-> `main` 에 직접 push 금지.
+> **Agent 과제의 기준 브랜치는 `agent-supervisor` 입니다.** PR 의 base 도 `agent-supervisor`.
+> `main` 은 RAG 과제 제출본으로 **동결** — 어떤 PR 도 `main` 으로 보내지 않습니다.
+> 분담 · 계약 · 시간표는 [docs/ROLES.md](docs/ROLES.md).
 
 ---
 
 ## 0. 이 저장소의 특수 사정
 
-개발 시간이 **하루**이고, 워커 6개가 **State 키 하나**(`graph/state.py`)로 묶여 있습니다.
-그래서 아래 두 가지가 다른 어떤 규칙보다 중요합니다.
+개발 시간이 **하루**(DAY 2 퇴근 전 마감)이고, 워커 6개 · 판정 노드 2개 · Supervisor 가 **State 하나**(`graph/state.py`)로 묶여 있습니다.
+그래서 아래 세 가지가 다른 어떤 규칙보다 중요합니다.
 
 1. **State 키 이름·타입은 `graph/state.py` 가 유일한 정본** — 워커가 임의로 키를 추가하지 않는다. 필요하면 D 에게 이슈
 2. **자기 디렉토리만 고친다** — 각 파일 첫 줄 docstring 의 `[소유: X]` 확인. 남의 파트는 이슈로 넘긴다
+3. **판정과 게이트를 섞지 않는다** — `assess` · `evaluator`(Judge) 는 판정 결과만 State 에 쓰고, `next` 는 `supervisor`(Gate, 순수 함수) 만 쓴다.
+   워커는 `next` · `retry` · `sufficiency` · `eval_result` 를 절대 반환하지 않는다 (교안 부록 B — 판정은 확률, 게이트는 결정론)
 
-워커 인터페이스는 전부 `run(state) -> dict` 이고 **자기 출력 키만** 반환합니다 (설계서 5.2).
-그래서 워커끼리는 파일이 겹칠 일이 없고, 충돌이 난다면 거의 `state.py` · `pyproject.toml` · `README.md` 입니다.
+워커 인터페이스는 전부 `run(state) -> dict` 이고 **자기 출력 키 + `citations` + `llm_calls`** 만 반환합니다.
+`rework_request` 가 있으면 `worker` 가 자기 이름일 때만 읽고, **그 기술만** 다시 돌립니다 (`*_eval` 은 기술 단위 병합 reducer).
+충돌이 난다면 거의 `state.py` · `pyproject.toml` · `README.md` 입니다.
 
 ### 1회 설정 — 각자 자기 PC 에서 한 번만
 
@@ -35,10 +40,13 @@ uv run pytest                    # LLM 없이 도는 테스트
 
 | | 이름 | 담당 | 소유 디렉토리 |
 | --- | --- | --- | --- |
-| **A** | 박유진 | RAG 파이프라인 · 기술 조사 · 임베딩 실측 | `rag/` · `agents/tech_research.py` · `experiments/` · `prompts/rag_*.md` · `prompts/tech_research.md` |
-| **B** | 심준용 | 시장 · 이해관계자 | `agents/market.py` · `agents/stakeholder.py` · `prompts/market.md` · `prompts/stakeholder.md` · `prompts/rubrics/4.2` `4.3` |
-| **C** | 민영은 | 도메인 · 종합 · 편향 장치 | `agents/domain.py` · `agents/synthesis.py` · `prompts/domain.md` · `prompts/synthesis.md` · `prompts/neutrality_judge.md` · `prompts/rubrics/4.1` `4.4` `4.5` |
-| **D** | 황재원 | State · Graph · 보고서 · 발표 | `graph/` · `agents/report.py` · `app.py` · `prompts/report.md` · `outputs/report/` |
+| **A** | 박유진 | 충분성 판정(`assess`) · 관측성 · 기술 조사 · RAG | `graph/sufficiency.py` · `graph/observe.py` · `prompts/sufficiency_judge.md` · `rag/` · `agents/tech_research.py` · `experiments/` · `prompts/rag_*.md` · `prompts/tech_research.md` |
+| **B** | 심준용 | 시장 · 이해관계자 · 보고서 · 트레이스 캡처 | `agents/market.py` · `agents/stakeholder.py` · `agents/report.py` · `agents/report_render.py` · `prompts/market.md` · `prompts/stakeholder.md` · `prompts/report.md` · `prompts/rubrics/4.2` `4.3` · `outputs/report/` · `docs/tracing/` |
+| **C** | 민영은 | 품질 평가(`evaluator`) · 도메인 · 종합 | `agents/evaluator.py` · `prompts/evaluator.md` · `agents/domain.py` · `agents/synthesis.py` · `prompts/domain.md` · `prompts/synthesis.md` · `prompts/neutrality_judge.md` · `prompts/rubrics/4.1` `4.4` `4.5` |
+| **D** | 황재원 | Supervisor(게이트) · State · Graph · 통합 | `graph/supervisor.py` · `graph/state.py` · `graph/build.py` · `graph/safe.py` · `app.py` · README 취합 |
+
+> RAG 과제 대비 변경: `agents/report.py` · `prompts/report.md` 가 D → B, `graph/` 안에서도 파일 단위로 소유가 갈린다
+> (`sufficiency.py` · `observe.py` 는 A). `graph/dispatcher.py` 는 `supervisor.py` 로 대체 후 삭제 (D).
 
 `config/` · `scripts/` · `pyproject.toml` · `.env.example` · CI · `README.md` 는 공용입니다. 바꾸기 전에 슬랙에 공유하세요.
 누가 무엇을 기다리는지는 [docs/ROLES.md](docs/ROLES.md) 의존 그래프 참고.
@@ -49,13 +57,19 @@ uv run pytest                    # LLM 없이 도는 테스트
 
 ## 2. 브랜치 전략
 
-개발이 하루라 `develop` 없이 **main + 작업 브랜치** 2단계로만 갑니다.
+노션 명세: "**Branch 로 기존 작업과 구분**", GitHub 링크는 그대로. 그래서 `main`(RAG 제출본)은 건드리지 않고
+`agent-supervisor` 를 Agent 과제의 기준 브랜치로 씁니다. 그 아래는 RAG 때와 같은 **기준 브랜치 + 작업 브랜치** 2단계.
 
 ```
-main ────●────────●────────●────────●──▶   (항상 python app.py 가 도는 상태)
-          \      /  \     /  \     /
-           feat/3   feat/7   fix/11        (이슈 1개 = 브랜치 1개)
+main ────●  (RAG 제출본 · 동결)
+          \
+agent-supervisor ──●────────●────────●──▶   (항상 python app.py 가 도는 상태 · 제출 링크)
+                    \      /  \     /
+                     feat/50  feat/52        (이슈 1개 = 브랜치 1개, base = agent-supervisor)
 ```
+
+- 제출할 GitHub 링크: `https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/tree/agent-supervisor`
+- 작업 브랜치 이름 규칙은 아래 그대로. **PR 을 만들 때 base 를 `agent-supervisor` 로 바꾸는 것을 잊지 마세요** (GitHub 기본값은 `main`)
 
 ### 네이밍 규칙
 
@@ -76,9 +90,10 @@ main ────●────────●────────●──
 - 이슈 번호는 필수. 번호 없는 브랜치는 리뷰하지 않습니다.
 - 한 브랜치에 한 가지 일만. 커지면 이슈를 쪼개세요.
 
-> 이슈 페이지 오른쪽 **Development → Create a branch** 를 쓰면 브랜치가 이슈에 자동 연결되고,
-> PR 머지 시 이슈가 자동으로 닫힙니다. GitHub 이 제안하는 이름(`3-feat-...`)은
-> 그 팝업에서 `feat/3-stakeholder-worker` 로 **직접 고쳐서** 만드세요.
+> 이슈 페이지 오른쪽 **Development → Create a branch** 를 쓰면 브랜치가 이슈에 자동 연결됩니다.
+> 팝업의 **Change branch source** 에서 `agent-supervisor` 를 고르세요 (기본값은 `main`).
+> GitHub 이 제안하는 이름(`3-feat-...`)은 그 팝업에서 `feat/3-stakeholder-worker` 로 **직접 고쳐서** 만드세요.
+> Agent 과제는 base 가 `agent-supervisor` 라 머지해도 이슈가 **자동으로 닫히지 않습니다** — 5절 참고.
 
 ---
 
@@ -87,9 +102,10 @@ main ────●────────●────────●──
 ```bash
 # 1) 이슈 생성 (GitHub 웹에서 템플릿 선택) → 이슈 번호 확인 (#3)
 
-# 2) 최신 main 받기
-git switch main
-git pull origin main
+# 2) 최신 agent-supervisor 받기
+git fetch origin
+git switch agent-supervisor
+git pull origin agent-supervisor
 
 # 3) 브랜치 생성
 git switch -c feat/3-stakeholder-worker
@@ -102,7 +118,7 @@ git commit -m "feat(agents): 이해관계자 워커 — 찬반 각 2건 강제"
 # 5) 푸시
 git push -u origin feat/3-stakeholder-worker
 
-# 6) GitHub에서 PR 생성 (템플릿 자동 삽입됨) → 리뷰 요청
+# 6) GitHub에서 PR 생성 — base: agent-supervisor ← compare: feat/... (템플릿 자동 삽입됨) → 리뷰 요청
 
 # 7) 승인 후 Squash and merge → 브랜치 삭제
 ```
@@ -154,7 +170,13 @@ git commit -m "docs: README Tech Stack 에 Hit Rate/MRR 기재"
 ## 5. PR 규칙
 
 - 제목: `[FEAT] 이해관계자 워커 — 찬반 각 2건 강제` (이슈 제목과 맞추면 편합니다)
-- 본문의 `closes #3` 을 **반드시** 채우기 → 머지 시 이슈 자동 종료
+- 본문의 `closes #3` 을 **반드시** 채우기 — 어떤 이슈의 PR 인지 연결용
+- ⚠️ **base 가 `agent-supervisor` 면 이슈가 자동으로 닫히지 않습니다.** GitHub 은 기본 브랜치(`main`)로 가는 PR 에서만 `closes` 를 해석합니다.
+  **머지한 사람이 이슈를 직접 Close** 하세요
+- ⚠️ PR 본문에 자동으로 채워지는 템플릿은 **`main` 의 옛 버전**(RAG 소유 표)입니다. GitHub 은 기본 브랜치의 템플릿만 씁니다.
+  "건드린 디렉토리"는 이 문서 1절 소유 표 기준으로 체크하고, 아래 두 줄을 체크리스트에 직접 확인하세요:
+  워커가 `next` · `retry` · `sufficiency` · `eval_result` 를 반환하지 않음 / Judge 노드가 다음 노드를 정하지 않음
+- 이슈 템플릿은 `main` 에 있는 그대로 씁니다 (`…/issues/new/choose`) — 그대로 동작합니다
 - 리뷰어 **최소 1명** 승인 후 머지
 - 머지 방식: **Squash and merge**
 - 머지 후 원격 브랜치 삭제
@@ -188,7 +210,11 @@ PR 을 올리면 `검사` 가 자동으로 돕니다.
 | **풀 밖 문서를 `data/papers/` 에 넣고 인덱싱** | 과제 명세 위반. 반례·시장 자료는 웹검색으로 |
 | **`[추론]` 태그 없이 판단 문장 쓰기** | 태그 비율이 보고서 한계점 수치입니다 |
 | **API 키 코드 직접 입력** | `.env` + `load_dotenv`. CI 가 막습니다 |
-| **`main` 직접 push** | 아래 ⚠️ 참조 |
+| **`next` · `retry` · `sufficiency` · `eval_result` 를 워커에서 반환** | 게이트만 쓰는 키. 워커가 쓰면 라우팅이 재현되지 않는다 |
+| **Judge 노드(`assess` · `evaluator`) 안에서 다음 노드 결정** | 판정과 게이트가 섞이면 결정론 경계가 사라진다 (교안 부록 B) |
+| **워커 `except` 에서 오류를 삼키고 정상 결과처럼 반환** | `safe.py` 가 `node_status = "failed"` 로 남기게 둔다. 삼키면 충분성 판정이 실패를 "충분"으로 본다 |
+| **트레이스용으로 충분성 기준을 일부러 낮추거나 실패를 연출** | 재현성 항목에서 제출 trace 와 비교된다 |
+| **`main` 으로 PR · push** | `main` 은 RAG 제출본. 아래 ⚠️ 참조 |
 
 > ⚠️ **`main` 보호는 GitHub 이 강제하지 못할 수 있습니다.** 무료 플랜의 private 저장소에는
 > branch protection·ruleset 을 걸 수 없습니다 (public 전환 시 가능).
@@ -196,22 +222,23 @@ PR 을 올리면 `검사` 가 자동으로 돕니다.
 
 ---
 
-## 7. 설계서와 코드가 어긋나면
+## 7. 설계와 코드가 어긋나면
 
-설계서(`docs/설계서.md`)는 10시에 제출한 **정본**입니다. 개발하다 바꿔야 할 게 생기면:
+Agent 과제의 설계 정본은 [docs/ROLES.md](docs/ROLES.md) 0절(패턴) · 4절(State 계약)과 README 의 State Schema 7항목입니다.
+`docs/설계서.md` 는 RAG 과제 정본으로 그대로 둡니다. 개발하다 바꿔야 할 게 생기면:
 
 1. `[CHORE] 설계 변경` 이슈로 올리고 조원 합의
-2. 코드 PR 에서 "설계서 반영" 칸에 절 번호 적기
-3. 바뀐 이유를 보고서 **6. 한계점** 또는 README **Lessons Learned** 에 한 줄
+2. ROLES.md 4절과 `graph/state.py` 를 **같은 PR** 에서 고친다
+3. 바뀐 이유를 README **State Schema** 또는 **Lessons Learned** 에 한 줄
 
-설계와 코드가 다른데 설명이 없으면 "설계 구현 충실도" 항목에서 감점됩니다.
+채점은 "README 에 쓴 설계 근거가 코드에 구현됐는가"(State Schema 20점)를 봅니다. README 와 코드가 다르면 감점입니다.
 
 ---
 
 ## 8. 충돌이 났다면
 
 ```bash
-git fetch origin && git rebase origin/main    # 내 브랜치를 최신 main 위로
+git fetch origin && git rebase origin/agent-supervisor    # 내 브랜치를 최신 agent-supervisor 위로
 ```
 
 `state.py` 충돌이면 D 의 버전을 살리고 내 워커를 그 키 이름에 맞춥니다.
