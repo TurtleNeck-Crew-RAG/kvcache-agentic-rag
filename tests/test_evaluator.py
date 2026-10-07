@@ -572,3 +572,33 @@ def test_judge_overstated_rendered_claim_targets_cell(tmp_path, fake_judge):
 
     assert result["targets"] == ["market:KIVI"]
     assert "근거보다 강한 주장" in result["feedback"] and "(→ market:KIVI)" in result["feedback"]
+
+
+# ── #130: 도메인 '[URL][추론]' — assess 와 같은 출처 정의 ─────────────────────────
+
+URL_NEGATIVE = "KIVI는 이를 전제로 하지 않아 부적합하다[https://www.samsungsds.com/kr/insights/x.html][추론]"
+
+
+def test_bare_url_tag_counts_as_web_source():
+    assert evaluator._source_kinds(URL_NEGATIVE) == {"웹", "추론"}
+    assert evaluator._source_kinds("수치가 있다 [p.3].") == {"논문"}
+    assert evaluator._source_kinds("근거 없는 해석이다 [추론].") == {"추론"}
+
+
+def test_bare_url_tag_agrees_with_assess_definition():
+    from graph.sufficiency import SOURCE_TAG_RE
+
+    for text in (URL_NEGATIVE, f"반대 근거 [웹 {WEB_REFS[0]}]", "수치 [논문 p.2]", "해석이다 [추론]"):
+        assert bool(SOURCE_TAG_RE.search(text)) == bool(evaluator._source_kinds(text) - {"추론"}), text
+
+
+def test_bare_url_negatives_are_not_inference_only_in_rendered_cell():
+    markdown = _report().replace(
+        f"온디바이스 조건이 있다 [웹 {WEB_REFS[4]}].",
+        f"{URL_NEGATIVE}. 두 번째 반대 근거다[https://domain-c.example/kivi][추론].",
+    )
+
+    total, _, inference_only, _, _ = evaluator._tag_stats(markdown)
+
+    assert inference_only == 0 and total > 0
+    assert "추론 단독 0/" in evaluator.groundedness(markdown)["reason"]
