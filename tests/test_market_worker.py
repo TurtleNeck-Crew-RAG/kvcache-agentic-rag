@@ -45,6 +45,47 @@ def test_market_fixture_contract_and_technology_isolation(monkeypatch):
     assert all(ref["year"] == "2024" for ref in result["citations"])
 
 
+def test_rework_runs_only_requested_technology_with_hint_query(monkeypatch):
+    queries, prompts = install(monkeypatch, response)
+    current = state()
+    current["market_eval"] = {"KIVI": {"grade": "기존 결과"}}
+    current["rework_request"] = {
+        "worker": "market",
+        "tech": "InfiniGen",
+        "gap": "evidence",
+        "hint_query": "independent deployment evidence",
+    }
+    snapshot = copy.deepcopy(current)
+
+    result = market.run(current)
+
+    assert current == snapshot
+    assert set(result) == {"market_eval", "citations", "llm_calls"}
+    assert set(result["market_eval"]) == {"InfiniGen"}
+    assert result["llm_calls"] == 1 and len(prompts) == 1
+    assert len(queries) == 4
+    assert all('"InfiniGen"' in item["query"] for item in queries)
+    assert "independent deployment evidence" in queries[0]["query"]
+    assert json.loads(prompts[0][1][1])["tech"] == "InfiniGen"
+
+
+def test_rework_request_for_another_worker_is_ignored(monkeypatch):
+    queries, prompts = install(monkeypatch, response)
+    current = state()
+    current["rework_request"] = {
+        "worker": "domain",
+        "tech": "InfiniGen",
+        "gap": "evidence",
+        "hint_query": "domain-only query",
+    }
+
+    result = market.run(current)
+
+    assert set(result["market_eval"]) == set(web.TECHS)
+    assert result["llm_calls"] == 2 and len(prompts) == 2 and len(queries) == 6
+    assert all("domain-only query" not in item["query"] for item in queries)
+
+
 def test_rejects_invented_url_and_quote_without_trusting_grade(monkeypatch):
     def bad(payload):
         result = response(payload)
