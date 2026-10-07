@@ -1,7 +1,7 @@
 """기술 조사 에이전트 (RAG) — 설계서 2장, 5.4.  [소유: A 박유진]
 
 고정 질문 5(개요·메커니즘·수치·한계·적용조건) × 기술 2 → rag_node.ask() 기술별 독립 호출.
-출력 키: tech_summary · citations · retrieval_log · llm_calls
+출력 키: tech_summary · citations · llm_calls — 검색 로그는 State 가 아니라 outputs/retrieval_log.jsonl (observe.log_retrieval, #62)
 
 재작업 (Agent 과제, docs/ROLES.md 2절 A): rework_request.worker == "tech_research" 이면 **그 기술만** 다시 본다.
 - gap 이 failed · missing · no_evidence → 그 기술 전체 재조사 (고정 질문 5)
@@ -96,7 +96,7 @@ def rework(state: GraphState, req: dict) -> dict:
     log_retrieval(state.get("trace_id", ""), lg)
     # 다른 기술 결과도 그대로 실어 보낸다 — merge_by_tech 리듀서 전/후 어느 쪽에서도 안전
     return {"tech_summary": {**(state.get("tech_summary") or {}), tech: s},
-            "citations": c, "retrieval_log": lg, "llm_calls": n}
+            "citations": c, "llm_calls": n}
 
 
 def run(state: GraphState) -> dict:
@@ -110,24 +110,26 @@ def run(state: GraphState) -> dict:
         citations += c
         log += lg
         calls += n
-    log_retrieval(state.get("trace_id", ""), log)        # 정본은 outputs/retrieval_log.jsonl — State 반환은 이행 중(#62)
-    return {"tech_summary": tech_summary, "citations": citations, "retrieval_log": log, "llm_calls": calls}
+    log_retrieval(state.get("trace_id", ""), log)        # 검색 로그는 파일로만 (지속성 비용, #62)
+    return {"tech_summary": tech_summary, "citations": citations, "llm_calls": calls}
 
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv(".env")
-    out = run({})
+    from graph.observe import RETRIEVAL, new_trace_id, read_jsonl
+
+    trace_id = new_trace_id()
+    out = run({"trace_id": trace_id})
     Path("outputs").mkdir(exist_ok=True)
     Path("outputs/tech_summary.json").write_text(
         json.dumps(out["tech_summary"], ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    Path("outputs/retrieval_log.json").write_text(
-        json.dumps(out["retrieval_log"], ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    hits = sum(e["relevance"] == "yes" for e in out["retrieval_log"])
-    print(f"llm_calls={out['llm_calls']}  retrieval yes={hits}/{len(out['retrieval_log'])}  → outputs/tech_summary.json")
+    log = read_jsonl(RETRIEVAL, trace_id)
+    hits = sum(e["relevance"] == "yes" for e in log)
+    print(f"trace_id={trace_id}  llm_calls={out['llm_calls']}  retrieval yes={hits}/{len(log)}"
+          "  → outputs/tech_summary.json · outputs/retrieval_log.jsonl")
     for tech, s in out["tech_summary"].items():
         print(f"\n[{tech}] overview: {s['overview'][:150]}")
         print(f"  numbers({len(s['numbers'])}): {s['numbers'][:2]}")

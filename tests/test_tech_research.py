@@ -39,9 +39,9 @@ def test_run_uses_fallback_only_on_failure(monkeypatch):
                 "citations": [] if fail else [{"id_or_url": tech}], "llm_calls": 3, "faithful": True, "unsupported": []}
 
     monkeypatch.setattr(tr, "ask", fake_ask)
-    out = tr.run({})
-    assert set(out) == {"tech_summary", "citations", "retrieval_log", "llm_calls"}
-    assert len(seen) == 11 and len(out["retrieval_log"]) == 11      # 10 + 대체 1
+    out = tr.run({"trace_id": "R"})
+    assert set(out) == {"tech_summary", "citations", "llm_calls"}      # retrieval_log 는 State 로 안 보낸다 (#62)
+    assert len(seen) == 11 and len(ob.read_jsonl(ob.RETRIEVAL, "R")) == 11      # 10 + 대체 1 — 파일로
     kivi = out["tech_summary"]["KIVI"]
     assert kivi["limitations"] and kivi["numbers"] and kivi["overview"].endswith("[p.3]")
     assert out["llm_calls"] == 33
