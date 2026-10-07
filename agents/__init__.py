@@ -6,6 +6,6 @@
 | market | 시장 평가 | X | Tavily | market_eval | B 심준용 |
 | stakeholder | 이해관계자 평가 | X | Tavily | stakeholder_eval | B 심준용 |
 | domain | 도메인 평가 | O | retriever + Tavily | domain_eval | C 민영은 |
-| synthesis | 평가 종합 + 중립성 Judge | X | — | synthesis, trl_estimate, neutrality | C 민영은 |
+| synthesis | 평가 종합 (중립성은 evaluator) | X | — | synthesis, trl_estimate | C 민영은 |
 | report | 보고서 생성 | X | — | report_md | D 황재원 |
 """
