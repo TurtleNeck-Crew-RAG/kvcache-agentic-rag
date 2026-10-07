@@ -9,8 +9,7 @@
 | `stakeholder.md` | 이해관계자 — 찬·반 각 ≥2, retry 시 "반대 근거 검색" 변형 | B | 4.3 |
 | `domain.md` | 도메인 — 1단계 사실 질의(“온디바이스”·“적합” 단어 금지) / 2단계 판정 | C | 4.4, 5.5 장치 3 |
 | `synthesis.md` | 종합 — 관점×기술 매트릭스, 일치/상충, TRL | C | 4.1, 4.5 |
-| `neutrality_judge.md` | 중립성 Judge — 우열·추천 표현 탐지 | C | 5.5 장치 8 |
-| `evaluator.md` | 보고서 평가 Judge — 주장 ↔ evidence 대응 · 중립성 문맥 (규칙 통과 문장만) | C | ROLES 2절 C |
+| `evaluator.md` | 보고서 평가 Judge — 주장 ↔ evidence 대응 · 중립성 문맥 (규칙 통과 문장만, 5.5 장치 8 포함) | C | ROLES 2절 C |
 | `report.md` | 보고서 — 6장 목차 + REFERENCE 표기 형식 | D | 6 |
 | `rag_generator.md` | RAG 답변 생성 — `[p.N]` 태그, "문서에 없으면 없다고" | A | 5.4 |
 | `rag_relevance.md` / `rag_rewrite.md` / `rag_faithfulness.md` | Judge 1·2, 질문 재작성 | A | 3.7 |

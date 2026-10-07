@@ -1,18 +1,18 @@
-"""평가 종합 에이전트 + 중립성 Judge
+"""평가 종합 에이전트
 
 기술·시장·이해관계자·도메인 평가를 관점×기술 매트릭스로 합치고,
-일치점·상충점과 공개 정보 기반 TRL 추정을 생성한 뒤,
-별도 Judge가 추천·우열 표현을 검사한다.
+일치점·상충점과 공개 정보 기반 TRL 추정을 생성한다.
+중립성 검사는 최종 보고서 뒤 evaluator 가 한 곳에서 맡는다 (#83).
 
-출력 키: synthesis · trl_estimate · neutrality · llm_calls
+출력 키: synthesis · trl_estimate · llm_calls
 """
 from __future__ import annotations
 
 import json
 import re
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from agents._common import TECHS, llm, load_prompt
 from graph.state import GraphState
@@ -74,19 +74,6 @@ class SynthesisBundleOutput(BaseModel):
     trl_estimate: TRLEstimatesOutput
 
 
-class NeutralityOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    result: Literal["pass", "fail"]
-    violations: list[str]
-
-    @model_validator(mode="after")
-    def result_matches_violations(self) -> NeutralityOutput:
-        if (self.result == "pass") != (not self.violations):
-            raise ValueError("pass는 빈 violations, fail은 위반 문장이 필요합니다")
-        return self
-
-
 def _validate_inputs(state: GraphState) -> None:
     missing = [key for key in REQUIRED_INPUTS if not state.get(key)]
     incomplete: list[str] = []
@@ -110,20 +97,8 @@ def _render_prompt(state: GraphState) -> str:
         load_prompt("synthesis"),
         "## TRL Rubric\n" + load_prompt("rubrics/4.1-trl"),
         "## Synthesis Rubric\n" + load_prompt("rubrics/4.5-synthesis"),
+        "## 평가 입력\n" + json.dumps(payload, ensure_ascii=False, indent=2, default=str),
     ]
-    if state.get("retry", {}).get("synth", 0) > 0:
-        parts.append(
-            "## 재작성 요청\n이전 중립성 검증 위반을 모두 제거하라:\n"
-            + json.dumps(
-                state.get("neutrality", {}).get("violations", []),
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    parts.append(
-        "## 평가 입력\n"
-        + json.dumps(payload, ensure_ascii=False, indent=2, default=str)
-    )
     return "\n\n".join(parts)
 
 
@@ -131,23 +106,6 @@ def _unpack(output: SynthesisBundleOutput) -> tuple[dict[str, Any], dict[str, An
     data = output.model_dump(by_alias=True)
     trl_estimate = data.pop("trl_estimate")
     return data, trl_estimate
-
-
-def _judge(synthesis: dict[str, Any], trl_estimate: dict[str, Any]) -> NeutralityOutput:
-    prompt = "\n\n".join(
-        (
-            load_prompt("neutrality_judge"),
-            "## 검증 대상\n"
-            + json.dumps(
-                {"synthesis": synthesis, "trl_estimate": trl_estimate},
-                ensure_ascii=False,
-                indent=2,
-                default=str,
-            ),
-        )
-    )
-    result = llm("judge").with_structured_output(NeutralityOutput).invoke(prompt)
-    return NeutralityOutput.model_validate(result) if isinstance(result, dict) else result
 
 
 def run(state: GraphState) -> dict:
@@ -159,10 +117,8 @@ def run(state: GraphState) -> dict:
     if isinstance(structured, dict):
         structured = SynthesisBundleOutput.model_validate(structured)
     synthesis, trl_estimate = _unpack(structured)
-    neutrality = _judge(synthesis, trl_estimate)
     return {
         "synthesis": synthesis,
         "trl_estimate": trl_estimate,
-        "neutrality": neutrality.model_dump(),
-        "llm_calls": 2,
+        "llm_calls": 1,
     }
