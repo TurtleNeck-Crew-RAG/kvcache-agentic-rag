@@ -17,7 +17,6 @@ TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d)[^\]]*\]")     # [논문 p.N] �
 TAG_TOKEN_RE = re.compile(r"\[(?:논문|웹|추론|p\.\d)[^\]]*\]")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 FAIL_MARK = "워커 실패"                                        # graph/safe.py fallback 이 남기는 표식
-EVIDENCE_GAP_MARKERS = ("없음", "근거 부족", "미확인", "미검증", "확보 실패", "검색 결과로 확인되지")
 
 CHAPTERS = (           # (key, 제목) — 이 순서가 목차다. SUMMARY 맨 앞 · REFERENCE 맨 뒤 고정
     ("summary", "SUMMARY"),
@@ -204,13 +203,11 @@ def render_selection(selected: dict[str, Any]) -> str:
 # ---------- 4. 관점별 평가 (*_eval · trl_estimate) ----------
 
 def _nearest_tags(parts: list[str], index: int) -> list[str]:
-    """문단 끝 태그가 앞 문장까지 뒷받침하는 워커 출력 형식을 문장 단위로 보존한다."""
-    for distance in range(1, len(parts)):
-        for candidate in (index + distance, index - distance):
-            if 0 <= candidate < len(parts):
-                tags = TAG_TOKEN_RE.findall(parts[candidate])
-                if tags:
-                    return list(dict.fromkeys(tags))
+    """문단 끝 태그만 앞 문장에 전달한다. 앞 태그를 뒤 추론에 빌려주지는 않는다."""
+    for candidate in range(index + 1, len(parts)):
+        tags = TAG_TOKEN_RE.findall(parts[candidate])
+        if tags:
+            return list(dict.fromkeys(tags))
     return []
 
 
@@ -224,21 +221,19 @@ def _place_tags(part: str, tags: list[str]) -> str:
 
 
 def _grounded_text(text: str) -> str:
-    """근거 단위 안의 각 판단 문장에 태그를 붙이고, 태그가 전혀 없으면 서술을 노출하지 않는다."""
+    """기존 태그는 문장 단위로 보존하고, 대응 태그가 없는 판단은 숨기지 않고 추론으로 표시한다."""
     lines = []
     for raw in str(text).splitlines():
         line = raw.strip()
         if not line:
             continue
+        if line == "근거 없음":
+            lines.append(line)
+            continue
         parts = [part.strip() for part in SENTENCE_RE.split(line) if part.strip()]
-        tags_in_line = {_tag_kind(tag) for tag in TAG_RE.findall(line)}
-        if not tags_in_line:
-            continue
-        if tags_in_line == {"추론"} and any(marker in line for marker in EVIDENCE_GAP_MARKERS):
-            continue
         grounded = []
         for index, part in enumerate(parts):
-            tags = TAG_TOKEN_RE.findall(part) or _nearest_tags(parts, index)
+            tags = TAG_TOKEN_RE.findall(part) or _nearest_tags(parts, index) or ["[추론]"]
             grounded.append(_place_tags(part, tags))
         lines.append(" ".join(grounded))
     return "\n".join(lines) or "근거 없음"
@@ -265,7 +260,7 @@ def _eval_block(tech: str, e: dict[str, Any], *, compact: bool = False) -> list[
         out.append(f"    - 판정: {e['verdict']}")
     if compact:
         positives = [_report_claim(item) for item in e.get("positives", [])]
-        negatives = [_report_claim(item) for item in e.get("negatives", []) if "확보 실패" not in item]
+        negatives = [_report_claim(item) for item in e.get("negatives", [])]
         positives = [item for item in positives if item != "근거 없음"]
         negatives = [item for item in negatives if item != "근거 없음"]
         positives = positives[:2]

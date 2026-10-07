@@ -134,32 +134,41 @@ def test_evaluation_keeps_tags_per_claim_and_omits_raw_quotes():
     s = init_state({}, {})
     s["stakeholder_eval"] = {
         "KIVI": {
-            "grade": "중립", "rationale": "첫 판단이다. 두 번째 판단이다. [웹 https://a.example/x]",
+            "grade": "중립", "rationale": (
+                "첫 판단이다. 두 번째 판단이다. [웹 https://a.example/x]\n"
+                "공개 구현이 있다 [웹 https://github.com/x]. 폰 대역폭에서는 지연이 클 것이다."
+            ),
             "positives": ["근거 없는 장황한 긍정", "투자자 반응 미확인 [추론]"],
-            "negatives": ["배포 장벽이 있다. (원문: Deployment is hard.) [웹 https://b.example/y]"],
+            "negatives": [
+                "배포 장벽이 있다. (원문: Deployment is hard.) [웹 https://b.example/y]",
+                "반대 근거 확보 실패 [추론]",
+            ],
             "evidence": [], "confidence": 0.5,
         }
     }
 
     md = "## 4. 관점별 평가\n\n" + render_evaluation(s) + "\n\n## REFERENCE\n"
+    compact = render_evaluation(s, compact=True)
     records = [record for record in claim_records(md) if record.worker == "stakeholder"]
 
     assert records and all(_source_kinds(record.text) for record in records)
     assert "(원문:" not in md
-    assert "근거 없는 장황한 긍정" not in md
-    assert "투자자 반응 미확인" not in md
+    assert "근거 없는 장황한 긍정 [추론]" in md
+    assert "투자자 반응 미확인 [추론]" in md
+    assert "폰 대역폭에서는 지연이 클 것이다 [추론]." in md
+    assert "폰 대역폭에서는 지연이 클 것이다 [웹" not in md
+    assert "반대 근거 확보 실패 [추론]" in md and "반대 근거 확보 실패 [추론]" in compact
 
 
-def test_evaluation_fixture_meets_groundedness_ratios():
-    from agents.evaluator import MAX_INFERENCE_RATIO, MIN_TAGGED_RATIO, _tag_stats
+def test_evaluation_fixture_marks_every_claim_without_hiding_inference():
+    from agents.evaluator import _tag_stats
 
     md = "## 4. 관점별 평가\n\n" + render_evaluation(_full_state()) + "\n\n## REFERENCE\n"
     total, tagged, inference_only, tagged_ratio, inference_ratio = _tag_stats(md)
 
     assert total and tagged == total
-    assert tagged_ratio >= MIN_TAGGED_RATIO
-    assert inference_ratio <= MAX_INFERENCE_RATIO
-    assert inference_only < tagged
+    assert tagged_ratio == 1.0
+    assert inference_only > 0 and inference_ratio > 0
 
 
 def test_selection_renders_criteria_and_excluded():
