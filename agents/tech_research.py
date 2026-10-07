@@ -3,10 +3,16 @@
 고정 질문 5(개요·메커니즘·수치·한계·적용조건) × 기술 2 → rag_node.ask() 기술별 독립 호출.
 출력 키: tech_summary · citations · retrieval_log · llm_calls
 
+재작업 (Agent 과제, docs/ROLES.md 2절 A): rework_request.worker == "tech_research" 이면 **그 기술만** 다시 본다.
+- gap 이 failed · missing · no_evidence → 그 기술 전체 재조사 (고정 질문 5)
+- 그 외(numbers · limitations · evidence · Judge 의 unsupported · off_topic · eval) → hint_query 1개만 추가 검색해
+  기존 요약에 합친다. numbers · limitations 는 해당 필드에, 나머지는 evidence 에만
+
 단독 실행: uv run python -m agents.tech_research   → outputs/tech_summary.json (LLM 30~50회)
 """
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -17,6 +23,8 @@ from rag.rag_node import NO_EVIDENCE, ask
 
 NODE = "tech_research"
 LIST_FIELDS = ("numbers", "limitations", "apply_conditions")
+FULL_RERUN_GAPS = {"failed", "missing", "no_evidence"}     # 기존 요약을 믿을 수 없을 때만 전체 재조사
+GAP_FIELD = {"numbers": "numbers", "limitations": "limitations"}
 
 
 def questions(tech: str) -> list[tuple[str, list[str]]]:
@@ -63,7 +71,36 @@ def research(tech: str) -> tuple[TechSummary, list, list, int]:
     return summary, citations, log, calls
 
 
+def reinforce(prev: TechSummary, tech: str, gap: str, query: str) -> tuple[TechSummary, list, list, int]:
+    """보강 질의 1개 → 기존 요약에 합친다. 기존 근거는 지우지 않는다."""
+    s = copy.deepcopy(prev)
+    r = ask(tech, query, node=NODE)
+    s["evidence"] = list(s.get("evidence") or []) + r["evidence"]
+    field = GAP_FIELD.get(gap)
+    if field and r["answer"] != NO_EVIDENCE:
+        s[field] = list(s.get(field) or []) + _sentences(r["answer"])
+    if not r["faithful"]:
+        s["evidence"].append({"claim": f"Faithfulness 미통과(재작업 {gap}): " + "; ".join(r["unsupported"]),
+                              "tag": "추론", "ref": "judge", "page": None})
+    return s, r["citations"], [r["retrieval_entry"]], r["llm_calls"]
+
+
+def rework(state: GraphState, req: dict) -> dict:
+    tech, gap = req["tech"], req.get("gap", "")
+    prev = (state.get("tech_summary") or {}).get(tech)
+    if prev is None or gap in FULL_RERUN_GAPS or not req.get("hint_query"):
+        s, c, lg, n = research(tech)
+    else:
+        s, c, lg, n = reinforce(prev, tech, gap, req["hint_query"])
+    # 다른 기술 결과도 그대로 실어 보낸다 — merge_by_tech 리듀서 전/후 어느 쪽에서도 안전
+    return {"tech_summary": {**(state.get("tech_summary") or {}), tech: s},
+            "citations": c, "retrieval_log": lg, "llm_calls": n}
+
+
 def run(state: GraphState) -> dict:
+    req = state.get("rework_request") or {}
+    if req.get("worker") == NODE and req.get("tech") in TECHS:
+        return rework(state, req)
     tech_summary, citations, log, calls = {}, [], [], 0
     for tech in TECHS:                                   # 기술별 독립 호출 (장치 2)
         s, c, lg, n = research(tech)
