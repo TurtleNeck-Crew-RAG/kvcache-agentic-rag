@@ -16,6 +16,7 @@ supervisor(state) 는 판정 결과(sufficiency · eval_result) · 시도 횟수
   5. 평가 pass                                   → END  — 단 node_status 에 failed 가 남아 있으면 end_with_warning
      보고서는 있는데 eval_result 가 없음(evaluator 실패) → end_with_warning — 평가 없이 성공으로 끝내지 않는다 (#120)
   6. 평가 fail (eval_attempts < MAX_EVAL, 예산 안)  → targets 중 첫 실행 가능한 곳 — 재조사면 synthesis · 보고서를 비워 다시 흐르게
+     실행 가능한 target 이 없으면(셀은 재작업 소진, report 는 target 아님) → end_with_warning
   7. 평가 fail 소진                              → end_with_warning
 
 예산(#102) — 재작업 · 평가 루프는 "마무리(종합 · 보고서 · 평가) 예약분을 남기고도 예산 안"일 때만.
@@ -149,7 +150,8 @@ def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
             req = ReworkRequest(worker=w, tech=t, gap="eval", hint_query=ev.get("feedback", ""))
             return w, f"{tag} → {target} 재조사", {
                 **base, **CLEAR_SYNTHESIS, "rework_request": req, "retry": {target: retry.get(target, 0) + 1}}
-    return "report", f"{tag} → 실행 가능한 target 없음, 보고서 재작성", {**base, **CLEAR_REPORT}
+    # 되돌릴 셀이 전부 재작업 소진이고 report 도 target 이 아니면, 보고서를 다시 써도 고쳐지지 않는다 (#129 — 4장 문제는 셀 target)
+    return "end_with_warning", f"보고서 평가 fail({failed}) · 되돌릴 곳 소진 (targets {', '.join(ev.get('targets') or []) or '없음'})", {}
 
 
 def supervisor(state: GraphState) -> dict:
@@ -197,19 +199,33 @@ def unmet(state: GraphState) -> list[str]:
     return out
 
 
+REFERENCE_HEADING = "\n## REFERENCE"
+
+
 def _warning_md(items: list[str]) -> str:
     lines = "\n".join(f"- {x}" for x in items) or "- (기록된 미달 항목 없음)"
-    return f"\n\n## 자동 경고 — 상한 소진으로 종료\n\n{lines}\n"
+    return f"## 자동 경고 — 상한 소진으로 종료\n\n{lines}\n\n"
+
+
+def _insert_warning(md: str, items: list[str]) -> str:
+    """경고 절을 REFERENCE 앞(6장 한계점 뒤)에 넣는다 — 참고문헌 뒤에 본문이 오지 않게 (#121). REFERENCE 가 없으면 끝에."""
+    block = _warning_md(items)
+    i = md.find(REFERENCE_HEADING)
+    if i < 0:
+        return md.rstrip("\n") + "\n\n" + block
+    return md[:i].rstrip("\n") + "\n\n" + block + md[i + 1:]
 
 
 def end_with_warning(state: GraphState) -> dict:
     items = unmet(state)
     log_decision(state, "end_with_warning", END, "; ".join(items))
+    # 근거 부족 셀은 6장 한계점이 정본(report_render, #128) — 경고 절에는 상한 · 실패 · 평가 미달만 남겨 중복을 없앤다
+    items = [x for x in items if not x.startswith("근거 부족 셀 ")]
     out: dict[str, Any] = {"status": "SUCCESS" if _has_report(state) else "INTERRUPTED"}
     uri = state.get("report_uri")
     if uri and Path(uri).exists():
-        with open(uri, "a", encoding="utf-8") as f:
-            f.write(_warning_md(items))
-    elif state.get("report_md"):                         # 이행 중 — app.py 가 report_md 를 파일 · PDF 로 저장
-        out["report_md"] = state["report_md"] + _warning_md(items)
+        path = Path(uri)
+        path.write_text(_insert_warning(path.read_text(encoding="utf-8"), items), encoding="utf-8")
+    elif state.get("report_md"):                         # safe fallback 의 report_md — app.py 가 파일 · PDF 로 저장
+        out["report_md"] = _insert_warning(state["report_md"], items)
     return out
