@@ -44,6 +44,7 @@ def summarize(trace_id: str | None = None) -> dict[str, Any]:
             reworks[cell] += 1
             before.setdefault(cell, []).append(reason.split(" — ", 1)[1] if " — " in reason else "")
     eval_loops = sum("평가 fail" in d.get("reason", "") and "루프" in d.get("reason", "") for d in decisions)
+    web = observe.read_jsonl(observe.WEB, trace_id)                # Tavily — 크레딧 과금, 보고용 (#102)
     unresolved = {c: v for c, v in sufficiency.items()
                   if v.get("rule") == "fail" or v.get("judge") == "insufficient"}
     return {
@@ -58,6 +59,8 @@ def summarize(trace_id: str | None = None) -> dict[str, Any]:
         "unresolved": unresolved,
         "eval_result": eval_result,
         "rework_effect": rework_effect(before, sufficiency),
+        "web_calls": dict(Counter(w.get("node", "") for w in web)),
+        "web_empty": sum(1 for w in web if not w.get("n_results")),
     }
 
 
@@ -94,6 +97,9 @@ def rework_effect(before: dict[str, list[str]], sufficiency: dict[str, dict]) ->
 
 def to_markdown(s: dict[str, Any]) -> str:
     run = s["run"]
+    web = ", ".join(f"{n} {c}" for n, c in sorted(s["web_calls"].items())) or "없음"
+    if s["web_empty"]:
+        web += f" (결과 0건 {s['web_empty']}회)"
     out = [f"# 실행 요약 — `{s['trace_id']}`", ""]
     if run:
         out += ["| 항목 | 값 |", "|---|---|",
@@ -102,6 +108,7 @@ def to_markdown(s: dict[str, Any]) -> str:
                 f"| 셀 재작업 | {s['rework_total']}회 — {', '.join(f'{c} ×{n}' for c, n in s['reworks'].items()) or '없음'} |",
                 f"| 평가 루프 | {s['eval_loops']}회 (eval_attempts {run.get('eval_attempts')}) |",
                 f"| LLM 호출 | {run.get('llm_calls')} |",
+                f"| 웹 검색 (Tavily) | {sum(s['web_calls'].values())}회 — {web} |",
                 f"| 소요 | {run.get('elapsed_sec')}초 |", ""]
     else:
         out += ["(run.json 이 다른 실행 것 — 결정 로그만 표시)", ""]

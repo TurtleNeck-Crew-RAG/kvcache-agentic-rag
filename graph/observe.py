@@ -24,6 +24,7 @@ from typing import Any
 OUT = Path("outputs")
 DECISIONS = "decisions.jsonl"
 RETRIEVAL = "retrieval_log.jsonl"
+WEB = "web_calls.jsonl"
 PROJECT = "kv-cache-agent"          # LangSmith 프로젝트 이름은 .env 의 LANGSMITH_PROJECT 가 정한다 — 여기선 태그로만
 
 
@@ -95,6 +96,14 @@ def read_jsonl(name: str, trace_id: str | None = None) -> list[dict[str, Any]]:
         return []
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     return [r for r in rows if trace_id is None or r.get("trace_id") == trace_id]
+
+
+def log_web(trace_id: str, node: str, query: str, n_results: int) -> None:
+    """웹 검색(Tavily) 1회 — 크레딧 과금이라 토큰에 안 잡힌다. 게이트가 읽지 않는 보고용 값이라 State 밖에 (#102).
+
+    실패한 질의도 n_results=0 으로 남긴다 (크레딧은 쓰였다). 시장 · 이해관계자(B) · 도메인(C) 워커가 질의마다 부른다.
+    """
+    _append(WEB, [{"trace_id": trace_id, "node": node, "query": query, "n_results": n_results, "ts": _now()}])
 
 
 def retrieval_entries(state: dict) -> list[dict[str, Any]]:
