@@ -19,12 +19,27 @@ class MarketResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
-def queries(tech: str) -> list[str]:
-    return [
+def queries(tech: str, hint_query: str = "") -> list[str]:
+    base = [
         f'"{tech}" KV cache official adoption framework integration release',
         f'"{tech}" KV cache on-device LLM market memory demand',
         f'"{tech}" KV cache open source implementation roadmap follow-up research',
     ]
+    if hint_query.strip():
+        return [f'"{tech}" KV cache {hint_query.strip()}', *base]
+    return base
+
+
+def _targets(state: GraphState) -> tuple[tuple[str, ...], str]:
+    """시장 재작업이면 요청된 기술만, 아니면 초기 실행처럼 두 기술을 처리한다."""
+    request = state.get("rework_request")
+    if not request or request.get("worker") != "market":
+        return web.TECHS, ""
+
+    tech = request.get("tech")
+    if tech not in web.TECHS:
+        raise ValueError(f"unknown market rework technology: {tech!r}")
+    return (tech,), request.get("hint_query", "")
 
 
 def _evaluate(response: MarketResponse, sources: dict) -> tuple[dict, list]:
@@ -50,12 +65,13 @@ def _evaluate(response: MarketResponse, sources: dict) -> tuple[dict, list]:
 
 def run(state: GraphState) -> dict:
     out, citations, calls = {}, [], 0
-    for tech in web.TECHS:
+    targets, hint_query = _targets(state)
+    for tech in targets:
         summary = state.get("tech_summary", {}).get(tech)
         if not summary:
             out[tech] = web.blank("기술 조사 입력 없음 — fixtures는 테스트에서 명시적으로 주입")
             continue
-        sources, notes = web.search(queries(tech))
+        sources, notes = web.search(queries(tech, hint_query))
         if not sources:
             out[tech] = web.blank("시장 웹 근거 없음")
         else:
