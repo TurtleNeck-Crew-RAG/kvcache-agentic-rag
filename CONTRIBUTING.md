@@ -70,7 +70,7 @@ agent-supervisor ──●────────●────────●
 ```
 
 - 제출할 GitHub 링크: `https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/tree/agent-supervisor`
-- 작업 브랜치 이름 규칙은 아래 그대로. **PR 을 만들 때 base 를 `agent-supervisor` 로 바꾸는 것을 잊지 마세요** (GitHub 기본값은 `main`)
+- 작업 브랜치 이름 규칙은 아래 그대로. **저장소 기본 브랜치가 `agent-supervisor`** 라서 PR base · 새 브랜치 출발점이 기본으로 여기 잡힙니다 (2026-10-07 변경, 마감 후 `main` 으로 되돌림)
 
 ### 네이밍 규칙
 
@@ -92,9 +92,9 @@ agent-supervisor ──●────────●────────●
 - 한 브랜치에 한 가지 일만. 커지면 이슈를 쪼개세요.
 
 > 이슈 페이지 오른쪽 **Development → Create a branch** 를 쓰면 브랜치가 이슈에 자동 연결됩니다.
-> 팝업의 **Change branch source** 에서 `agent-supervisor` 를 고르세요 (기본값은 `main`).
+> 기본 브랜치가 `agent-supervisor` 라 따로 고를 필요 없이 여기서 갈라집니다.
 > GitHub 이 제안하는 이름(`3-feat-...`)은 그 팝업에서 `feat/3-stakeholder-worker` 로 **직접 고쳐서** 만드세요.
-> Agent 과제는 base 가 `agent-supervisor` 라 머지해도 이슈가 **자동으로 닫히지 않습니다** — 5절 참고.
+> PR 머지 시 `closes #N` 으로 이슈가 자동으로 닫힙니다.
 
 ---
 
@@ -171,13 +171,11 @@ git commit -m "docs: README Tech Stack 에 Hit Rate/MRR 기재"
 ## 5. PR 규칙
 
 - 제목: `[FEAT] 이해관계자 워커 — 찬반 각 2건 강제` (이슈 제목과 맞추면 편합니다)
-- 본문의 `closes #3` 을 **반드시** 채우기 — 어떤 이슈의 PR 인지 연결용
-- ⚠️ **base 가 `agent-supervisor` 면 이슈가 자동으로 닫히지 않습니다.** GitHub 은 기본 브랜치(`main`)로 가는 PR 에서만 `closes` 를 해석합니다.
-  **머지한 사람이 이슈를 직접 Close** 하세요
+- 본문의 `closes #3` 을 **반드시** 채우기 → 머지 시 이슈 자동 종료 (기본 브랜치 `agent-supervisor` 로 가는 PR 이라 동작)
 - **base 는 무조건 `agent-supervisor`.** `main` 으로 열었으면 PR 화면 제목 옆 `Edit` → base 드롭다운에서 바꾸면 됩니다 (새로 열 필요 없음).
   CI `base-branch` 검사가 실패하면 base 가 `main` 이라는 뜻입니다
-- 이슈 · PR 템플릿은 GitHub 이 기본 브랜치(`main`)에서만 읽어서, Agent 과제용 안내를 `main` 에 반영했습니다 (#50 · #51).
-  `agent-supervisor` 의 `.github/` 는 같은 내용의 사본입니다 — 템플릿을 바꿀 땐 두 브랜치를 같이 바꿉니다
+- 이슈 · PR 템플릿은 GitHub 이 기본 브랜치에서 읽습니다 — 지금은 `agent-supervisor` 의 `.github/` 가 쓰입니다.
+  `main` 의 `.github/` 는 #51 에서 넣은 같은 안내의 사본 (마감 후 기본 브랜치를 `main` 으로 되돌려도 안내가 남게)
 - 리뷰어 **최소 1명** 승인 후 머지
 - 머지 방식: **Squash and merge**
 - 머지 후 원격 브랜치 삭제
