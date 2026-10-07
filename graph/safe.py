@@ -11,6 +11,8 @@ Agent 과제 (#54) — fallback 이 정상 결과처럼 보이지 않게 제어 
 - 성공: node_status[name] = "ok" (재작업이 성공하면 failed 가 풀린다)
 - rework_request 가 자기 것이면 fallback 은 그 기술만 쓴다 — merge_by_tech 라 다른 기술의 정상 결과를 덮지 않는다
 - 판정 노드(assess · evaluator)도 감싼다. fallback 페이로드는 없고 node_status · errors 만
+- 토큰 (#102): 노드 안의 LLM 호출 토큰을 get_usage_metadata_callback 으로 재서 {"tokens": n} 을 붙인다 (실패해도 쓴 만큼).
+  워커 코드는 고치지 않는다. 노드 안에서 스레드를 띄우면 콜백이 전파되지 않으니 워커는 순차 호출을 유지한다
 """
 from __future__ import annotations
 
@@ -19,6 +21,8 @@ import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
+
+from langchain_core.callbacks import get_usage_metadata_callback
 
 from graph.state import TECHS, ErrorRecord
 
@@ -73,16 +77,21 @@ def safe(name: str, fn: Callable[[dict], dict]) -> Callable[[dict], dict]:
     """노드 run(state) 를 감싼다. 정상이면 + node_status ok, 예외면 fallback + node_status failed · last_error · errors."""
 
     def wrapped(state: dict) -> dict:
-        try:
-            out = fn(state)
-        except Exception as e:                    # noqa: BLE001 — 어떤 예외든 실패 기록으로 바꾸는 것이 목적
-            reason = _short(e)
-            print(f"[safe] {name} 실패 → 실패 기록으로 대체: {reason}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            return _failed(name, state, type(e).__name__, reason)
-        if not isinstance(out, dict):
-            return _failed(name, state, "TypeError", f"run() 이 dict 가 아닌 {type(out).__name__} 을 반환")
-        return {**out, "node_status": {name: "ok"}}
+        with get_usage_metadata_callback() as usage:
+            try:
+                out = fn(state)
+            except Exception as e:                # noqa: BLE001 — 어떤 예외든 실패 기록으로 바꾸는 것이 목적
+                reason = _short(e)
+                print(f"[safe] {name} 실패 → 실패 기록으로 대체: {reason}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                out = _failed(name, state, type(e).__name__, reason)
+            else:
+                if isinstance(out, dict):
+                    out = {**out, "node_status": {name: "ok"}}
+                else:
+                    out = _failed(name, state, "TypeError", f"run() 이 dict 가 아닌 {type(out).__name__} 을 반환")
+        tokens = sum(u.get("total_tokens", 0) for u in usage.usage_metadata.values())
+        return {**out, "tokens": tokens} if tokens else out
 
     wrapped.__name__ = f"safe_{name}"
     return wrapped

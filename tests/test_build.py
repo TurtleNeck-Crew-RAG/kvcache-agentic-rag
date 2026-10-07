@@ -106,3 +106,22 @@ def test_sqlite_checkpoint_resumes_in_new_graph(tmp_path):
     out = app(second).invoke(None, cfg)                       # 메모리를 공유하지 않는 새 인스턴스
     assert first == ["tech_research", "market"]
     assert second == ["stakeholder", "domain", "synthesis", "report"] and out["status"] == "SUCCESS"
+
+
+def test_tokens_accumulate_across_nodes():
+    """#102 — 워커가 LLM 을 부르면 safe 가 노드별 토큰을 재고, State tokens 는 add 리듀서로 누적된다."""
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import AIMessage
+
+    def spend(n):
+        msg = AIMessage(content="x", response_metadata={"model_name": "fake"},
+                        usage_metadata={"input_tokens": n, "output_tokens": 0, "total_tokens": n})
+        GenericFakeChatModel(messages=iter([msg])).invoke("q")
+
+    workers = make_workers([])
+    for name in ("tech_research", "report"):
+        inner = workers[name]
+        workers[name] = lambda s, inner=inner: (spend(1000), inner(s))[1]
+    out = build_graph(workers=workers, assess=make_assess(), evaluator=make_evaluator()).invoke(
+        init_state({}, {}), {"recursion_limit": RECURSION_LIMIT})
+    assert out["tokens"] == 2000 and out["status"] == "SUCCESS"

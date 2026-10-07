@@ -8,11 +8,13 @@ from langgraph.graph import END
 import graph.supervisor as sup
 from graph.state import TECHS, init_state
 from graph.supervisor import (
+    FINAL_RESERVE,
     LLM_BUDGET,
     MAX_EVAL,
     MAX_REWORK,
     MAX_STEPS,
     NEXT_NODES,
+    TOKEN_BUDGET,
     WORKERS,
     end_with_warning,
     route,
@@ -223,3 +225,49 @@ def test_tech_research_rework_precedes_downstream_collection():
     assert supervisor(s)["next"] == "tech_research"
     s["retry"] = {"tech_research:KIVI": MAX_REWORK}
     assert supervisor(s)["next"] == "market"
+
+
+# ── 예산 · 라운드 로빈 (#102) ──
+
+def _bad(gap="negatives", reason="반대 근거 1건 < 2"):
+    return {"rule": "fail", "judge": None, "gap": gap, "hint_query": "q", "reason": reason}
+
+
+def test_max_steps_is_derived_from_structure():
+    assert sup.CELLS == 8 and sup.BASE_TURNS == 7
+    assert MAX_STEPS == 7 + 8 * MAX_REWORK + MAX_EVAL * 3 + 1 == 30
+    assert sup.RECURSION_LIMIT == 3 * MAX_STEPS + 10
+
+
+def test_round_robin_gives_every_insufficient_cell_one_rework_first():
+    """예전에는 market:KIVI 가 1/2 · 2/2 를 연속으로 가져가 뒤쪽 domain 이 예산에 밀렸다."""
+    s = _collected()
+    s["sufficiency"] = {"market:KIVI": _bad(), "domain:InfiniGen": _bad("counter_example", "웹 근거 0건")}
+    order = []
+    for _ in range(4):
+        out = supervisor(s)
+        order.append(out["rework_request"]["worker"] + ":" + out["rework_request"]["tech"])
+        s["retry"] = {**s["retry"], **out["retry"]}
+    assert order == ["market:KIVI", "domain:InfiniGen", "market:KIVI", "domain:InfiniGen"]
+    assert supervisor(s)["next"] == "synthesis"                      # 둘 다 2/2 소진
+
+
+def test_rework_reason_carries_gap_for_run_summary():
+    s = _collected()
+    s["sufficiency"] = {"domain:KIVI": _bad("counter_example", "웹 근거 0건 < 1")}
+    reason = sup._decide(s)[1]
+    assert reason == "부족 셀 domain:KIVI 재작업 1/2 — gap=counter_example · 웹 근거 0건 < 1"
+
+
+def test_token_budget_keeps_final_reserve_for_report():
+    """마무리 예약분을 못 남기면 재작업 · 평가 루프를 멈추고 보고서로 — 보고서는 끝까지 만든다."""
+    s = _collected()
+    s["sufficiency"] = {"market:KIVI": _bad()}
+    s["tokens"] = TOKEN_BUDGET - FINAL_RESERVE                          # 딱 맞으면 아직 허용
+    assert supervisor(s)["next"] == "market"
+    s["tokens"] = TOKEN_BUDGET - FINAL_RESERVE + 1
+    assert supervisor(s)["next"] == "synthesis"
+    s.update(synthesis={"matrix": {}}, report_uri="r.md", eval_result=_fail_eval(["report"]))
+    out = supervisor(s)
+    assert out["next"] == "end_with_warning"
+    assert any("예산 소진" in x and "TOKEN_BUDGET" in x for x in sup.unmet(s))

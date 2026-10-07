@@ -88,3 +88,28 @@ def test_main_runs_stub_graph_to_end_with_trace_id(app_module, monkeypatch, tmp_
     assert run["status"] == "SUCCESS" and run["trace_id"] and run["eval_attempts"] == 1
     assert run["visited"].count("report") == 2 and run["visited"][-1] == "evaluator"
     assert app_module.main(["--resume", run["trace_id"]]) == 2     # InMemorySaver 로는 프로세스를 넘는 재개 불가 — 명시적으로 거절
+
+
+def test_main_timeout_stops_at_node_boundary_as_interrupted(app_module, monkeypatch, tmp_path):
+    """#102 — 벽시계 상한은 게이트 밖(app.py). 넘으면 노드 경계에서 멈추고 INTERRUPTED · tokens 기록."""
+    import importlib
+
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from tests.fixtures.stubs import make_assess, make_evaluator, make_workers
+
+    monkeypatch.delitem(sys.modules, "graph.build", raising=False)
+    gb = importlib.import_module("graph.build")
+    workers = make_workers()
+    monkeypatch.setattr(app_module, "build_graph", lambda **kw: gb.build_graph(
+        workers=workers, assess=make_assess(), evaluator=make_evaluator(), **kw))
+    monkeypatch.setattr(app_module, "_ensure_index", lambda skip: None)
+    monkeypatch.setattr(app_module, "_save_report", lambda state, visited: None)
+    monkeypatch.setattr(app_module.yaml, "safe_load", lambda *_: {})
+    monkeypatch.setattr(app_module.Path, "read_text", lambda *_a, **_k: "")
+    monkeypatch.setattr(app_module, "make_checkpointer", lambda: (InMemorySaver(), False))
+    assert app_module.main(["--skip-index", "--timeout", "0"]) == 1
+    with open(tmp_path / "run.json", encoding="utf-8") as f:
+        run = json.load(f)
+    assert run["status"] == "INTERRUPTED" and run["error"].startswith("Timeout")
+    assert run["visited"] == [] and run["step_count"] == 1 and "tokens" in run   # 첫 노드(supervisor) 경계에서 멈춤

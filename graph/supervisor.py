@@ -9,13 +9,19 @@ supervisor(state) 는 판정 결과(sufficiency · eval_result) · 시도 횟수
   1·2는 선행 조건 단계(STAGES)별로 — tech_summary 가 나머지 워커의 입력이라 기술 조사 셀이 충분/소진돼야 다음 단계로
   1. 미수집 셀                                    → 해당 워커
   2. 부족 셀 (재작업 < MAX_REWORK, 예산 안)          → 해당 워커 + rework_request
+     라운드 로빈 — 재작업 횟수가 가장 적은 셀부터. 모든 부족 셀이 1회씩 받은 뒤에야 2회째 (뒤쪽 관점이 예산에 밀려 잘리지 않게)
   3. synthesis 없음                              → synthesis
   4. 보고서 없음                                  → report   (→ evaluator 는 엣지로 고정)
   5. 평가 pass (또는 평가 노드 미연결)               → END  — 단 node_status 에 failed 가 남아 있으면 end_with_warning
   6. 평가 fail (eval_attempts < MAX_EVAL, 예산 안)  → targets 중 첫 실행 가능한 곳 — 재조사면 synthesis · 보고서를 비워 다시 흐르게
   7. 평가 fail 소진                              → end_with_warning
 
+예산(#102) — 재작업 · 평가 루프는 "마무리(종합 · 보고서 · 평가) 예약분을 남기고도 예산 안"일 때만.
+예산이 바닥나도 보고서는 끝까지 만든다. 단위는 토큰(safe.py 가 노드마다 집계), 호출 수는 병행 안전망.
+시간 제한은 게이트가 아니라 app.py 의 RUN_TIMEOUT — 게이트가 시계를 읽으면 같은 State 에서 다른 결정이 나온다.
+
 결정 사유는 observe.log_decision() 으로 State 밖에 남긴다 (A 소유 — 없으면 아래 fallback).
+재작업 사유 형식 "부족 셀 {cell} 재작업 k/MAX — gap={gap} · {판정 사유}" 는 graph/run_summary.py 가 파싱한다 — 바꾸면 같이 고칠 것.
 """
 from __future__ import annotations
 
@@ -34,15 +40,24 @@ except ImportError:                                   # A 의 observe 머지 전
         print(f"[{node}] {state.get('trace_id', '')} → {decision}: {reason}", file=sys.stderr)
 
 
-# ── 상한 — README State Schema 「종료 보장」에 그대로 적는다 ──
-MAX_STEPS = 30            # supervisor 턴 수. 정상 7 + 셀 재작업 최대 8×2 + 평가 루프 2×3 = 29
-MAX_REWORK = 2            # 셀("{worker}:{tech}")별 재작업
-MAX_EVAL = 2              # 보고서 평가 fail 후 되돌리는 횟수
-LLM_BUDGET = 150          # 넘으면 재작업 · 평가 루프만 멈추고 최단 경로로 보고서 (#29: 100 → 150)
-RECURSION_LIMIT = 3 * MAX_STEPS + 10   # 턴당 노드 ≤3 (supervisor → 워커 → assess/evaluator)
-
-WORKERS = ("tech_research", "market", "stakeholder", "domain")     # 셀을 가진 워커 — 같은 단계 안에서는 이 순서가 tie-break
+WORKERS = ("tech_research", "market", "stakeholder", "domain")     # 셀을 가진 워커 — 라운드 로빈 동률이면 이 순서
 STAGES = (("tech_research",), ("market", "stakeholder", "domain"))  # 선행 조건 — 앞 단계 셀이 충분/소진돼야 다음 단계
+
+# ── 상한 — README State Schema 「종료 보장」에 그대로 적는다 ──
+MAX_REWORK = 2            # 셀("{worker}:{tech}")별 재작업 — 평가 루프의 관점 재조사도 같은 카운터
+MAX_EVAL = 2              # 보고서 평가 fail 후 되돌리는 횟수
+# Supervisor 턴 상한은 구조에서 계산한다 (실측값이 아니라 "구조상 최대 + 1" 안전망)
+CELLS = len(WORKERS) * len(TECHS)                                   # 8
+BASE_TURNS = len(WORKERS) + 3                                       # 수집 4 + synthesis + report + END = 7
+MAX_STEPS = BASE_TURNS + CELLS * MAX_REWORK + MAX_EVAL * 3 + 1      # 7 + 16 + 6 + 1 = 30 (평가 루프 1회 ≤ 재조사 · 종합 · 보고서)
+RECURSION_LIMIT = 3 * MAX_STEPS + 10                                # 턴당 노드 ≤3 (supervisor → 워커 → assess/evaluator)
+
+# 예산 (#102) — ⚠️ 잠정값. 첫 실제 실행의 노드별 토큰으로 확정한다:
+#   TOKEN_BUDGET = (기본 경로 + Σ부족셀 재작업단가[worker] + assess 재판정 + 평가 루프 1회 × MAX_EVAL) × 1.2~1.5
+#   FINAL_RESERVE = synthesis 1회 + report 4회 + evaluator(LLM Judge 포함) 1회
+TOKEN_BUDGET = 600_000    # 잠정 — RAG 실행 ~100회 × 호출당 ~3K 토큰 + 재작업 여유
+FINAL_RESERVE = 80_000    # 잠정 — 넘으면 재작업 · 평가 루프를 멈추고 남은 예산으로 마무리
+LLM_BUDGET = 150          # 호출 수 안전망 (#29) — 토큰 예산 확정 후 제거 여부 결정
 PAYLOAD = {"tech_research": "tech_summary", "market": "market_eval",
            "stakeholder": "stakeholder_eval", "domain": "domain_eval"}
 
@@ -62,6 +77,16 @@ def _has_report(state: GraphState) -> bool:
     return bool(state.get("report_uri") or state.get("report_md"))
 
 
+def _budget(state: GraphState) -> tuple[bool, str]:
+    """재작업 · 평가 루프를 더 허용하는가 (허용, 막힌 사유). 마무리 예약분을 남겨 둔다."""
+    calls, tokens = state.get("llm_calls", 0), state.get("tokens", 0)
+    if calls > LLM_BUDGET:
+        return False, f"llm_calls {calls} > LLM_BUDGET {LLM_BUDGET}"
+    if tokens + FINAL_RESERVE > TOKEN_BUDGET:
+        return False, f"tokens {tokens} + FINAL_RESERVE {FINAL_RESERVE} > TOKEN_BUDGET {TOKEN_BUDGET}"
+    return True, ""
+
+
 def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
     """(next, 사유, 추가 갱신). 순수 함수 — State 를 읽기만 한다."""
     steps, max_steps = state.get("step_count", 0), state.get("max_steps", MAX_STEPS)
@@ -69,26 +94,26 @@ def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
         return "end_with_warning", f"step_count {steps} ≥ max_steps {max_steps}", {}
 
     retry = state.get("retry") or {}
-    calls = state.get("llm_calls", 0)
-    budget_ok = calls <= LLM_BUDGET
+    budget_ok, budget_why = _budget(state)
     verdicts = state.get("sufficiency") or {}
     for stage in STAGES:
         for w in stage:                                                       # 1
             missing = [t for t in TECHS if t not in (state.get(PAYLOAD[w]) or {})]
             if missing:
                 return w, f"미수집 셀 {', '.join(f'{w}:{t}' for t in missing)}", {}
-        for w in stage:                                                       # 2
-            for t in TECHS:
-                cell = f"{w}:{t}"
-                v = verdicts.get(cell)
-                if not v or not _insufficient(v):
-                    continue
-                n = retry.get(cell, 0)
-                if n >= MAX_REWORK or not budget_ok:
-                    continue                                                  # 소진 — end_with_warning / 보고서 한계점에 남는다
-                req = ReworkRequest(worker=w, tech=t, gap=v.get("gap", ""), hint_query=v.get("hint_query", ""))
-                return w, f"부족 셀 {cell} 재작업 {n + 1}/{MAX_REWORK} — {v.get('reason', '')}", {
-                    "rework_request": req, "retry": {cell: n + 1}}
+        if not budget_ok:
+            continue                                                          # 예산 소진 — 부족 셀은 한계점에 남는다
+        candidates = [                                                        # 2 — 라운드 로빈: (재작업 횟수, 워커 순, 기술 순)
+            (retry.get(f"{w}:{t}", 0), WORKERS.index(w), TECHS.index(t), w, t)
+            for w in stage for t in TECHS
+            if (v := verdicts.get(f"{w}:{t}")) and _insufficient(v) and retry.get(f"{w}:{t}", 0) < MAX_REWORK
+        ]
+        if candidates:
+            n, _, _, w, t = min(candidates)
+            cell, v = f"{w}:{t}", verdicts[f"{w}:{t}"]
+            req = ReworkRequest(worker=w, tech=t, gap=v.get("gap", ""), hint_query=v.get("hint_query", ""))
+            return w, f"부족 셀 {cell} 재작업 {n + 1}/{MAX_REWORK} — gap={v.get('gap', '')} · {v.get('reason', '')}", {
+                "rework_request": req, "retry": {cell: n + 1}}
 
     if not state.get("synthesis"):                                            # 3
         return "synthesis", "수집 셀 전부 충분 또는 재작업 소진", {}
@@ -106,7 +131,7 @@ def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
     attempts = state.get("eval_attempts", 0)                                  # 6 · 7
     failed = ", ".join(k for k, it in (ev.get("items") or {}).items() if not it.get("passed"))
     if attempts >= MAX_EVAL or not budget_ok:
-        why = f"eval_attempts {attempts} ≥ {MAX_EVAL}" if budget_ok else f"llm_calls {calls} > LLM_BUDGET {LLM_BUDGET}"
+        why = f"eval_attempts {attempts} ≥ {MAX_EVAL}" if budget_ok else budget_why
         return "end_with_warning", f"보고서 평가 fail({failed}) · {why}", {}
 
     base = {"eval_attempts": attempts + 1}
@@ -144,8 +169,9 @@ def unmet(state: GraphState) -> list[str]:
     steps, max_steps = state.get("step_count", 0), state.get("max_steps", MAX_STEPS)
     if steps >= max_steps:
         out.append(f"Supervisor 턴 상한 도달 (step_count {steps} / max_steps {max_steps})")
-    if state.get("llm_calls", 0) > LLM_BUDGET:
-        out.append(f"LLM 호출 예산 초과 (llm_calls {state.get('llm_calls')} / {LLM_BUDGET}) — 이후 재작업 · 평가 루프 중단")
+    budget_ok, budget_why = _budget(state)
+    if not budget_ok:
+        out.append(f"예산 소진 ({budget_why}) — 이후 재작업 · 평가 루프 중단, 마무리 예약분으로 보고서")
     retry = state.get("retry") or {}
     for cell, v in (state.get("sufficiency") or {}).items():
         if _insufficient(v):
