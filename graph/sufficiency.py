@@ -32,6 +32,7 @@ PERSPECTIVE = {"tech_research": "기술 성숙도", "market": "시장성",
 # ── 결정론 층 기준 — README State Schema · 확증편향 방지에 그대로 적는다 ──
 MIN_EVIDENCE = 3                                                  # 셀당 근거 문장 — 출처가 있는 [논문] · [웹] 만 센다
 GROUNDED_TAGS = ("논문", "웹")                                      # [추론] · Faithfulness 미통과 메모는 근거가 아니다
+SOURCE_TAG_RE = re.compile(r"\[(?:웹|논문|p\.\d|https?://)[^\]]*\]")  # 출처 태그 — [웹 URL] · [논문 p.3] · [p.3] · [URL](도메인 워커)
 MIN_NEGATIVES = 2                                                 # 반대 근거 — 전 관점 공통 (RAG 확증편향 방지 장치 7). 질은 Judge 기준 3
 # 출처 기준은 관점의 자료 구조에 따라 둘로 나뉜다
 WEB_PERSPECTIVES = ("market", "stakeholder")                      # 웹 검색만 쓰는 관점
@@ -92,6 +93,21 @@ def _mostly_no_evidence(grade: str) -> bool:
     return bool(parts) and sum(NO_EVIDENCE in p for p in parts) * 2 > len(parts)
 
 
+def _counts_as_negative(text: str) -> bool:
+    """반대 근거로 셀 수 있는가 — "추론 단독" 만 뺀다 (evaluator 의 추론 단독과 같은 정의, #115).
+
+    - "반대 근거 확보 실패 [추론]" (stakeholder 재작업 소진 표시) → 안 셈
+    - "… [https://…][추론]" (도메인: 웹 출처 + 판단) → 셈. 출처 태그가 있으면 [추론] 이 붙어도 근거가 있다
+    - "… [추론]" 만 (출처 없음) → 안 셈
+    같은 문장이 두 번 들어와도 1건 (호출부에서 set)
+    """
+    if "확보 실패" in text:
+        return False
+    if SOURCE_TAG_RE.search(text):
+        return True
+    return not text.rstrip().endswith("[추론]")
+
+
 def _fail(gap: str, hint: str, reason: str) -> dict:
     return {"rule": "fail", "judge": None, "gap": gap, "hint_query": hint, "reason": reason}
 
@@ -136,8 +152,7 @@ def rule_check(worker: str, tech: str, payload: dict | None, node_status: dict[s
         return _fail("no_evidence", hint("evidence"), f"등급 과반이 근거 없음: {payload.get('grade', '')}")
     if len(evidence) < MIN_EVIDENCE:
         return _fail("evidence", hint("evidence"), f"근거 {len(evidence)}건 < {MIN_EVIDENCE}")
-    # "반대 근거 확보 실패 [추론]" 같은 [추론] 표시는 반대 근거가 아니다 — evidence 의 GROUNDED_TAGS 와 같은 원칙
-    neg = sum(1 for n in payload.get("negatives") or [] if not str(n).rstrip().endswith("[추론]"))
+    neg = len({str(n).strip() for n in payload.get("negatives") or [] if _counts_as_negative(str(n))})
     if neg < MIN_NEGATIVES:
         return _fail("negatives", hint("negatives"), f"반대 근거 {neg}건 < {MIN_NEGATIVES}")
     n_src, top, share = _source_bias(evidence)

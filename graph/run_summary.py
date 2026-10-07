@@ -69,7 +69,7 @@ def _verdict_key(reason: str) -> str:
     """회차 비교용 판정 키 — LLM 문장은 빼고 결정론 부분만.
 
     게이트 사유가 `gap=<gap> · <사유>` 형식이면 gap 을 쓰고(#102), 아니면 ` · Judge: …` 앞의 규칙 사유만 쓴다.
-    Judge 문장은 같은 문제여도 표현이 바뀌므로, 그걸로 비교하면 "개선" 이 부풀어 MAX_REWORK 근거가 약해진다.
+    Judge 문장은 같은 문제여도 표현이 바뀌므로, 그걸로 비교하면 변화가 부풀어 MAX_REWORK 근거가 약해진다.
     """
     if reason.startswith("gap="):
         return reason.split(" ", 1)[0]
@@ -80,7 +80,8 @@ def rework_effect(before: dict[str, list[str]], sufficiency: dict[str, dict]) ->
     """셀마다 재작업 회차별 판정 변화 — MAX_REWORK 의 한계 효용 근거 (#102).
 
     states[0] = 1회째 직전, states[k] = k 회째 직후 판정 (마지막은 sufficiency 의 최종 판정).
-    effect: 해소(최종 충분) · 개선(판정 키가 바뀜) · 변화 없음(같은 판정 키 반복) — 키는 _verdict_key
+    effect: 해소(최종 충분) · 다른 사유로 부족(판정 키가 바뀌었지만 여전히 부족) · 변화 없음(같은 판정 키 반복)
+    — 키는 _verdict_key. "다른 사유로 부족" 은 개선이 아니다 (#115: 첫 실행에서 3/5 를 개선으로 세어 과장됐음)
     """
     rows = []
     for cell, reasons in before.items():
@@ -91,7 +92,7 @@ def rework_effect(before: dict[str, list[str]], sufficiency: dict[str, dict]) ->
         states = reasons + ["충분" if ok else final_reason]
         keys = [_verdict_key(x) for x in states]
         last_changed = len(keys) >= 2 and keys[-1] != keys[-2]
-        effect = "해소" if ok else ("개선" if last_changed else "변화 없음")
+        effect = "해소" if ok else ("다른 사유로 부족" if last_changed else "변화 없음")
         rows.append({"cell": cell, "states": states, "effect": effect, "reworks": len(reasons)})
     return rows
 
@@ -134,8 +135,10 @@ def to_markdown(s: dict[str, Any]) -> str:
             out.append(f"| {r['cell']} | {r['reworks']} | {st[0]} | {st[1]} | {st[2] if r['reworks'] >= 2 else '—'} | {r['effect']} |")
         n2 = [r for r in s["rework_effect"] if r["reworks"] >= 2]
         if n2:
-            useful = sum(r["effect"] != "변화 없음" for r in n2)
-            out += ["", f"2회째 재작업이 판정을 바꾼 셀: **{useful}/{len(n2)}** — 거의 없으면 MAX_REWORK 1 검토"]
+            solved = sum(r["effect"] == "해소" for r in n2)
+            other = sum(r["effect"] == "다른 사유로 부족" for r in n2)
+            out += ["", f"2회째 재작업으로 **해소된 셀: {solved}/{len(n2)}** (다른 사유로 부족 {other} · 변화 없음 {len(n2) - solved - other})"
+                        " — 해소가 거의 없으면 MAX_REWORK 1 검토"]
 
     ev = s["eval_result"]
     if ev:
