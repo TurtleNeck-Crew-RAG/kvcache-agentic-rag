@@ -175,6 +175,30 @@ def test_limitation_stats_and_rendering():
     assert "ResponseRelevancy TBD" in md                      # 없는 수치는 TBD
 
 
+def test_limitation_stats_prefers_retrieval_file_for_trace(tmp_path, monkeypatch):
+    import graph.observe as observe
+
+    monkeypatch.setattr(observe, "OUT", tmp_path)
+    s = _full_state()
+    s["trace_id"] = "trace-report"
+    s["retrieval_log"] = [
+        {"tech": "KIVI", "relevance": "no_evidence", "rewritten": False},
+    ]
+    observe.log_retrieval("trace-report", [
+        {"tech": "InfiniGen", "relevance": "yes", "rewritten": True},
+    ])
+    observe.log_retrieval("other-trace", [
+        {"tech": "KIVI", "relevance": "no_evidence", "rewritten": False},
+    ])
+
+    st = limitation_stats(s)
+
+    assert st["retrieval_total"] == 1
+    assert st["no_evidence"] == 0
+    assert st["rewritten"] == 1 and st["rewrite_recovered"] == 1
+    assert st["by_tech_no_evidence"] == {"KIVI": 0, "InfiniGen": 0}
+
+
 def test_assemble_order_summary_first_reference_last():
     md = assemble("T", {"summary": "S", "reference": "R"})
     heads = [line for line in md.splitlines() if line.startswith("## ")]
