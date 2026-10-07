@@ -24,7 +24,7 @@ MIN_TAGGED_RATIO = 0.90
 MAX_INFERENCE_RATIO = 0.10
 MAX_WEB_SOURCE_SHARE = 0.40
 
-TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d)[^\]]*\]")
+TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d|https?://)[^\]]*\]")   # [URL] 은 웹 — assess SOURCE_TAG_RE 와 같은 정의 (#130)
 URL_RE = re.compile(r"https?://[^\s\]\)>]+")
 ARXIV_RE = re.compile(r"\b\d{4}\.\d{4,5}(?=v\d+\b|\b)")   # 2402.02750 · 2402.02750v2 → 2402.02750
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
@@ -166,9 +166,18 @@ def claim_units(markdown: str) -> list[str]:
     return [record.text for record in claim_records(markdown)]
 
 
+def _tag_kind(tag: str) -> str:
+    """TAG_RE 그룹 → 태그 종류. [p.N] 은 논문, [URL] 은 웹."""
+    if tag.startswith("p."):
+        return "논문"
+    if tag.startswith("http"):
+        return "웹"
+    return tag
+
+
 def _source_kinds(unit: str) -> set[str]:
     clean = INLINE_CODE_RE.sub("", unit)
-    return {"논문" if tag.startswith("p.") else tag for tag in TAG_RE.findall(clean)}
+    return {_tag_kind(tag) for tag in TAG_RE.findall(clean)}
 
 
 def _tag_stats(markdown: str) -> tuple[int, int, int, float, float]:

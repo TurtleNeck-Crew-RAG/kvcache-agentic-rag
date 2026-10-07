@@ -358,3 +358,14 @@ def test_unknown_rework_tech_is_rejected(monkeypatch):
 
     with pytest.raises(ValueError, match="unknown domain rework technology"):
         domain.run(_rework_state(tech="H2O"))
+
+
+def test_bare_url_tag_is_normalized_to_web_tag():
+    """도메인 반대 근거의 '[URL][추론]' → '[웹 URL][추론]' (#130)."""
+    data = _evaluation("KIVI").model_dump()
+    data["negatives"][0] = "전제로 하지 않아 부적합하다[https://example.com/a][추론]"
+
+    out = domain.DomainEvaluationOutput.model_validate(data)
+
+    assert out.negatives[0] == "전제로 하지 않아 부적합하다[웹 https://example.com/a][추론]"
+    assert domain._require_source_tag("축 해석 [https://example.com/b]") == "축 해석 [웹 https://example.com/b]"

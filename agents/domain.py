@@ -40,7 +40,11 @@ MAX_HINT_CHARS = 200                                                 # evaluator
 SOURCE_TAG = re.compile(r"\[(?:논문|웹|추론|p\.\d)[^\]]*\]")   # [논문 p.2, p.9] · [논문 2406.19707 p.9] · [p.3] · [웹 URL] · [추론] — 실출력은 쪽을 여러 개 묶는다(5회차)
 
 
+BARE_URL_TAG = re.compile(r"\[(https?://[^\]\s]+)\]")
+
+
 def _require_source_tag(value: str) -> str:
+    value = BARE_URL_TAG.sub(r"[웹 \1]", value)   # [URL] → [웹 URL] — 다른 워커 · README 출처 태그 형식으로 통일 (#130)
     if "근거 없음" not in value and not SOURCE_TAG.search(value):   # "…(논문에 근거 없음)." 도 근거 없음 기록으로 인정
         # 태그 없는 판단 문장 = 근거 없는 추론으로 기록한다 (장치 6). 예외로 워커 전체를 버리면 태그가 있는 나머지 문장까지
         # 사라진다 — 6회차: TRL basis 2문장 때문에 종합 전체가 실패. [추론] 은 한계점 4 의 비율에 그대로 잡힌다.
