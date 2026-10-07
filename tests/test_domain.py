@@ -203,3 +203,158 @@ def test_domain_output_requires_two_tagged_negatives():
     data["negatives"][0] = "출처가 없는 한계"
     out = domain.DomainEvaluationOutput.model_validate(data)        # 무태그 문장은 버리지 않고 [추론] 으로 기록 (#40 후속)
     assert out.negatives[0] == "출처가 없는 한계 [추론]"
+
+
+# ── #81: rework_request — 요청 기술만 보강 ─────────────────────────────
+
+from graph.state import merge_by_tech  # noqa: E402
+
+WEB_URL = "https://example.com/mobile-memory"
+
+
+class _Harness:
+    """ask · TavilySearch · LLM 을 기록하는 가짜 묶음."""
+
+    def __init__(self, monkeypatch, web_tech: set[str] | None = None):
+        self.asks: list[tuple[str, str]] = []
+        self.queries: list[str] = []
+        self.prompts: list[str] = []
+        web_tech = web_tech if web_tech is not None else {"InfiniGen"}
+        harness = self
+
+        def fake_ask(tech, question, node):
+            harness.asks.append((tech, question))
+            return _rag_answer(tech, question, node)
+
+        class FakeSearch:
+            def __init__(self, **kwargs):
+                pass
+
+            def invoke(self, request):
+                harness.queries.append(request["query"])
+                return {"results": [{"title": "Mobile memory", "url": WEB_URL, "content": "counter", "score": 0.9}]}
+
+        class FakeEvaluator:
+            def invoke(self, prompt):
+                harness.prompts.append(prompt)
+                tech = "KIVI" if "## 평가 기술\nKIVI" in prompt else "InfiniGen"
+                out = _evaluation(tech)
+                if tech in web_tech and tech == "KIVI":
+                    out.evidence.append(domain.EvidenceOutput(claim="KIVI mobile counter", tag="웹", ref=WEB_URL))
+                return out
+
+        fake_llm = Mock()
+        fake_llm.with_structured_output.return_value = FakeEvaluator()
+        monkeypatch.setattr(domain, "llm", lambda role: fake_llm)
+        monkeypatch.setattr(domain, "ask", fake_ask)
+        monkeypatch.setattr(domain, "TavilySearch", FakeSearch)
+
+
+def _previous_eval(tech: str) -> dict:
+    data = domain._as_domain_eval(_evaluation(tech))
+    data["evidence"] = data["evidence"] + [{"claim": "earlier fact", "tag": "논문", "ref": "prev-ref", "page": 3}]
+    data["rationale"] = f"{tech} 직전 판정 근거 [논문 p.3]."
+    return data
+
+
+def _rework_state(worker="domain", tech="KIVI", gap="evidence", hint="KIVI 스마트폰 메모리 절감 조건") -> dict:
+    return {
+        "trace_id": "t-rework",
+        "domain": {"constraints": {"memory": {"ram_gb": [8, 16]}},
+                   "counter_examples": ["LLM in a flash", "Samsung LPDDR5X-PIM"]},
+        "selected": {"sw": {"name": "KIVI", "arxiv": "2402.02750"}, "hw": {"name": "InfiniGen", "arxiv": "2406.19707"}},
+        "domain_eval": {t: _previous_eval(t) for t in ("KIVI", "InfiniGen")},
+        "rework_request": {"worker": worker, "tech": tech, "gap": gap, "hint_query": hint},
+    }
+
+
+def test_other_worker_rework_keeps_full_run(monkeypatch):
+    h = _Harness(monkeypatch)
+
+    result = domain.run(_rework_state(worker="market"))
+
+    assert set(result["domain_eval"]) == {"KIVI", "InfiniGen"}
+    assert len(h.asks) == 10 and len(h.prompts) == 2
+    assert not any("## 재작업 요청" in p for p in h.prompts)
+
+
+def test_paper_gap_reinforces_only_requested_tech_with_hint(monkeypatch):
+    h = _Harness(monkeypatch)
+    state = _rework_state(gap="evidence", hint="KIVI 스마트폰 메모리 절감 조건")
+
+    result = domain.run(state)
+
+    assert set(result["domain_eval"]) == {"KIVI"}
+    assert h.asks == [("KIVI", "KIVI 스마트폰 메모리 절감 조건")]       # 사실 질의 5개를 다시 돌리지 않는다
+    assert h.queries == []                                               # 논문 gap 은 웹 검색 없음
+    assert len(h.prompts) == 1 and "InfiniGen" not in h.prompts[0]
+    assert "## 재작업 요청" in h.prompts[0] and "KIVI 직전 판정 근거" in h.prompts[0]
+    assert result["llm_calls"] == 2 + 1
+    assert len(result["retrieval_log"]) == 1
+    claims = {e["claim"] for e in result["domain_eval"]["KIVI"]["evidence"]}
+    assert {"paper fact", "earlier fact"} <= claims                      # 기존 근거 유지
+    assert set(result["domain_eval"]["KIVI"]["axes"]) == {"recall", "latency", "memory"}
+    assert result["domain_eval"]["KIVI"]["grade"] == result["domain_eval"]["KIVI"]["verdict"]
+    assert not ({"next", "retry", "sufficiency", "eval_result", "rework_request"} & result.keys())
+
+
+def test_reducer_merge_preserves_other_tech(monkeypatch):
+    _Harness(monkeypatch)
+    state = _rework_state()
+
+    result = domain.run(state)
+    merged = merge_by_tech(state["domain_eval"], result["domain_eval"])
+
+    assert merged["InfiniGen"] is state["domain_eval"]["InfiniGen"]
+    assert merged["KIVI"] is result["domain_eval"]["KIVI"]
+
+
+def test_counter_example_gap_searches_web_for_kivi(monkeypatch):
+    h = _Harness(monkeypatch, web_tech={"KIVI"})
+    hint = "KIVI 스마트폰 온디바이스 한계 반례 메모리 대역폭 전력"
+
+    result = domain.run(_rework_state(tech="KIVI", gap="counter_example", hint=hint))
+
+    assert h.asks == []                                                  # 반례 gap 은 논문 RAG 로 못 메운다
+    assert h.queries == [f"KIVI {hint}"]
+    assert "## HW 반례 웹 검색 결과" in h.prompts[0] and WEB_URL in h.prompts[0]
+    assert [c["id_or_url"] for c in result["citations"] if c["type"] == "웹"] == [WEB_URL]
+    assert result["llm_calls"] == 1
+
+
+def test_counter_example_gap_for_infinigen_adds_hint_to_counter_examples(monkeypatch):
+    h = _Harness(monkeypatch)
+
+    domain.run(_rework_state(tech="InfiniGen", gap="counter_example", hint="InfiniGen 모바일 반례"))
+
+    assert len(h.queries) == 3 and h.queries[-1] == "InfiniGen InfiniGen 모바일 반례"
+    assert any("LLM in a flash" in q for q in h.queries)
+
+
+def test_missing_previous_result_reruns_that_tech_from_scratch(monkeypatch):
+    h = _Harness(monkeypatch)
+    state = _rework_state(tech="InfiniGen", gap="missing")
+    state["domain_eval"].pop("InfiniGen")
+
+    result = domain.run(state)
+
+    assert set(result["domain_eval"]) == {"InfiniGen"}
+    assert [t for t, _ in h.asks] == ["InfiniGen"] * 5
+    assert "## 재작업 요청" not in h.prompts[0]
+    assert h.queries[-1] == "InfiniGen KIVI 스마트폰 메모리 절감 조건"   # hint 도 보강 검색에 쓴다
+
+
+def test_multiline_evaluator_feedback_is_clipped_to_first_line(monkeypatch):
+    h = _Harness(monkeypatch)
+    feedback = "groundedness: 「KIVI…」 근거 없는 단정 — 수치 출처를 다시 조사한다 (→ domain:KIVI)\nneutrality: …"
+
+    domain.run(_rework_state(gap="eval", hint=feedback))
+
+    assert h.asks == [("KIVI", feedback.splitlines()[0][: domain.MAX_HINT_CHARS])]
+
+
+def test_unknown_rework_tech_is_rejected(monkeypatch):
+    _Harness(monkeypatch)
+
+    with pytest.raises(ValueError, match="unknown domain rework technology"):
+        domain.run(_rework_state(tech="H2O"))
