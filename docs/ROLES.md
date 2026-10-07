@@ -210,6 +210,22 @@ README State Schema 7항목과의 대응: 제어 vs 페이로드 = 위 3구역 �
 
 ---
 
+## 5-1. 트레이스 캡처 규칙 — 전원 같은 방식으로
+
+노션 제출물 2번 「LangSmith Tracing — 동적 처리 확인 목적」. 채점(동적 동작 실증 20 · 재현성 10)은 **캡처 · 코드 · README 가 같은 실행을 가리키는지** 본다.
+
+| 무엇 | 규칙 |
+|---|---|
+| 이름 | LangSmith 프로젝트 · 태그 · run_name 전부 **`kv-cache-agent`**. 각자 `.env` 의 `LANGSMITH_PROJECT=kv-cache-agent` (`.env.example` 참고). RAG 과제 `kv-cache-eval` 과 섞지 않는다 |
+| 실행 하나 | 캡처는 **한 실행(trace_id) 것만**. `app.py` 가 찍는 `trace_id=…` 를 LangSmith 검색창에 태그로 넣으면 그 실행만 나온다. 여러 실행을 섞어 붙이지 않는다 |
+| 고르는 기준 | `uv run python -m graph.run_summary <trace_id>` 로 확인 — **셀 재작업 ≥1 · 평가 루프 ≥1** 이 찍힌 실행. 일부러 기준을 낮춰 만들지 않는다 (CONTRIBUTING 6절) |
+| 파일 | `docs/tracing/tracing-1.png`, `tracing-2.png` … — **시간 순서**. 경로가 길면 여러 장으로 나눈다 (노션) |
+| 보여야 할 것 | ① 전체 트리 (supervisor → 워커 → assess → supervisor 반복) ② **재작업** 한 장면 — supervisor run 의 metadata `decision` · `reason` ("부족 셀 … 재작업 1/2") ③ **평가 루프** — evaluator → supervisor → report 재작성 ④ 종료 (END 또는 end_with_warning) |
+| README 연결 | Run Record 표에 같은 `trace_id` · `run_summary --md` 결과 · 캡처 파일 목록을 적는다 |
+| 담당 | 캡처 B 심준용 · 실행 고르기 A 박유진 (`run_summary`) · README D 황재원 |
+
+---
+
 ## 6. 시간표 (DAY 2)
 
 | | A 박유진 | B 심준용 | C 민영은 | D 황재원 |
