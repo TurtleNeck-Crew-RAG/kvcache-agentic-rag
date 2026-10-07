@@ -105,7 +105,9 @@ def _write_chapter(common: str, instruction: str, payload: dict[str, Any], feedb
     if feedback:
         instruction += (
             "\n\n## 이전 보고서 평가 피드백\n"
-            "이 장과 관련된 지적만 반영하고, 입력에 없는 사실은 추가하지 않는다.\n"
+            "이 장과 관련된 지적만 반영하고, 입력에 없는 사실은 추가하지 않는다. "
+            "groundedness 지적이면 각 판단 문장 끝에 입력의 출처 태그를 붙인다. "
+            "대응 근거를 찾지 못한 문장은 삭제하거나 '근거 없음'으로만 쓴다.\n"
             + feedback
         )
     msgs = [
