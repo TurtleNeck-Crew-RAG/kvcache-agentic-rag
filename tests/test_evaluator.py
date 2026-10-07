@@ -398,3 +398,106 @@ def test_trl_parallel_statement_is_not_a_neutrality_suspect():
 
     assert evaluator.neutrality(markdown)["passed"]
     assert evaluator.neutrality_suspects(markdown) == []
+
+
+# ── #90: arXiv URL 정규화 · 태그 비율 분모 · 항목별 target ─────────────────
+
+def test_arxiv_urls_in_body_match_normalized_reference_ids():
+    markdown = _report().replace(
+        "KIVI는 KV cache를 양자화한다 [논문 p.1].",
+        "KIVI는 KV cache를 양자화한다 [웹 https://arxiv.org/html/2402.02750v2]. "
+        "InfiniGen도 인용한다 [웹 https://arxiv.org/abs/2406.19707] [웹 https://arxiv.org/pdf/2406.19707v1].",
+    )
+
+    item = evaluator.groundedness(markdown)
+
+    assert "REFERENCE 누락" not in item["reason"] and "본문 미인용" not in item["reason"]
+
+
+def test_arxiv_url_missing_from_reference_is_reported_as_id():
+    markdown = _report().replace(
+        "KIVI는 KV cache를 양자화한다 [논문 p.1].",
+        "KIVI는 KV cache를 양자화한다 [웹 https://arxiv.org/pdf/2604.05012].",
+    )
+
+    item = evaluator.groundedness(markdown)
+
+    assert not item["passed"] and "REFERENCE 누락: arXiv:2604.05012" in item["reason"]
+
+
+def test_trailing_tag_after_period_belongs_to_previous_sentence():
+    markdown = _report().replace(
+        "KIVI는 KV cache를 양자화한다 [논문 p.1].",
+        f"KIVI는 KV cache를 양자화한다. [웹 {WEB_REFS[0]}]",
+    )
+
+    units = evaluator.claim_units(markdown)
+
+    assert f"KIVI는 KV cache를 양자화한다. [웹 {WEB_REFS[0]}]" in units
+    assert f"[웹 {WEB_REFS[0]}]" not in units
+    assert evaluator.groundedness(markdown)["passed"]
+
+
+def test_absence_records_and_follow_up_items_are_not_claims():
+    markdown = _report().replace(
+        "두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].",
+        "두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].\n\n"
+        "- 근거 없음\n- 판단에 필요한 추가 확인 항목은 InfiniGen의 실측 결과다.",
+    )
+
+    units = evaluator.claim_units(markdown)
+
+    assert "근거 없음" not in units
+    assert not any(u.startswith("판단에 필요한 추가 확인 항목") for u in units)
+
+
+def test_bias_missing_negative_targets_that_cell():
+    state = _state()
+    state["stakeholder_eval"]["InfiniGen"]["negatives"] = []
+
+    result = evaluator.evaluate(_report(), state)
+
+    assert not result["items"]["bias"]["passed"]
+    assert result["targets"] == ["stakeholder:InfiniGen"]
+
+
+def test_bias_source_concentration_targets_heaviest_cells_first():
+    state = deepcopy(_state())
+    for key, tech in (("market_eval", "KIVI"), ("domain_eval", "InfiniGen")):
+        state[key][tech]["evidence"] = [
+            {"claim": "근거", "tag": "웹", "ref": "https://same.example/a", "page": None}
+        ] * (3 if key == "market_eval" else 2)
+
+    result = evaluator.evaluate(_report(), state)
+
+    assert "same.example" in result["items"]["bias"]["reason"]
+    assert result["targets"][:2] == ["market:KIVI", "domain:InfiniGen"]
+    assert "report" not in result["targets"]
+
+
+def test_bias_counts_arxiv_urls_as_one_paper_source():
+    assert evaluator._source_key("https://arxiv.org/html/2402.02750v2") == "arXiv:2402.02750"
+    assert evaluator._source_key("https://arxiv.org/abs/2402.02750") == "arXiv:2402.02750"
+    assert evaluator._source_key("https://www.github.com/jy-yuan/KIVI") == "github.com"
+
+
+def test_coverage_gap_targets_worker_only_when_cell_payload_missing():
+    markdown = _report().replace("- **InfiniGen** — 조건부\n    - 온디바이스 조건이 있다", "- 온디바이스 조건이 있다")
+    rendered_gap = evaluator.evaluate(markdown, _state())
+    state = _state()
+    state["domain_eval"].pop("InfiniGen")
+    source_gap = evaluator.evaluate(markdown, state)
+
+    assert "4.4:InfiniGen" in rendered_gap["items"]["coverage"]["reason"]
+    assert rendered_gap["targets"] == ["report"]                  # State 에는 있음 → 렌더링 문제
+    assert source_gap["targets"][0] == "domain:InfiniGen"         # State 에도 없음 → 워커 재조사
+
+
+def test_rule_targets_put_cells_before_report():
+    state = _state()
+    state["market_eval"]["KIVI"]["negatives"] = []
+    markdown = _report().replace("두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].", "따라서 KIVI를 선택해야 한다 [추론].")
+
+    result = evaluator.evaluate(markdown, state)
+
+    assert result["targets"] == ["market:KIVI", "report"]
