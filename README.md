@@ -176,18 +176,22 @@ uv run pytest                    # 단위 테스트
 - 민영은 : 품질 평가 노드(Groundedness · 중립성 · 편향 · 커버리지), 도메인 · 종합 Agent
 - 황재원 : Supervisor 게이트 · State Schema · Graph · 체크포인터 · 실행 예산(토큰 · 라운드 로빈 · 시간 상한), README 취합
 
-## Run Record — Agent 과제 전체 실행
-
-<!-- B: 통합 실행 후 갱신. `uv run python -m graph.run_summary --md` 상단 표를 그대로 쓰면 칸이 다 채워진다. 캡처 규칙은 ROLES.md 5-1 (trace_id 하나 · tracing-N.png 시간순) -->
+## Run Record — Agent 과제 전체 실행 (최종 · 제출본)
 
 | 항목 | 값 |
 |---|---|
-| 실행 | `uv run python app.py --skip-index --pdf-name "..."` · trace_id `…` |
-| 경로 | `outputs/run.json` 의 `visited` — 재작업 · 평가 루프가 찍힌 곳 |
-| Supervisor | step_count … / 30 · 셀 재작업 `retry` … · 평가 루프 `eval_attempts` … / 2 · `status` … |
-| LLM 호출 · 토큰 | … / 150 · tokens … / TOKEN_BUDGET · Tavily … 회 |
-| LangSmith | [docs/tracing/](docs/tracing/) `tracing-1.png` ~ |
-| 보고서 | … 쪽 · 품질 평가 항목별 결과 … |
+| 실행 | `uv run python app.py --skip-index --pdf-name "…"` · 커밋 `c5fc5cb` · trace_id **`20261007-180300-9eeda6`** (LangSmith `kv-cache-agent`, 캡처 metadata 의 `revision_id` 와 같음) |
+| 종료 | step 22 에서 `end_with_warning` (평가 루프 2회 소진) → `status=SUCCESS` · 노드 실패 0 · 무한 루프 없음 |
+| 경로 | 수집 4턴(기술 조사 → 시장 → 이해관계자 → 도메인) → **셀 재작업 9회**(라운드 로빈, 부족 셀 5개가 1회씩 받은 뒤 2회째) → 종합 → 보고서 → 평가 fail → **`tech_research:KIVI` 재조사** → 종합 → 보고서 → 평가 fail → 재조사 → 종합 → 보고서 → 평가 fail → 경고 종료 |
+| 셀 재작업 | market:KIVI ×2 · market:InfiniGen ×2 · stakeholder:InfiniGen ×2 · domain:KIVI ×1(**해소** — 1회차에 웹 반례 확보) · domain:InfiniGen ×2 · 평가 루프 재조사 tech_research:KIVI ×2 |
+| 끝까지 부족한 셀 | market:KIVI · market:InfiniGen (출처 편중 github.com · huggingface.co 88%) · stakeholder:InfiniGen (huggingface.co 62%) · domain:InfiniGen (Judge: 스마트폰 환경 직접 근거 부족) — 보고서 6장 한계점에 표시 |
+| 품질 평가 | neutrality · bias · coverage pass / **groundedness fail** (판단 문장 태그 53% · 추론 단독 18% · 4장 압축 후 본문에 없는 REFERENCE 항목) — 보고서 「자동 경고」 절에 기록 |
+| 비용 · 시간 | LLM 호출 152 · **토큰 442,205** / `TOKEN_BUDGET` 600,000 · Tavily 47회 · **742초** / `RUN_TIMEOUT` 1,200 |
+| 보고서 | [report.md](outputs/report/report.md) · [PDF](outputs/report/Agent_판교_10반_박유진+황재원+민영은+심준용.pdf) **9쪽** (12쪽 → 4장 자동 압축) · SUMMARY · REFERENCE 포함 |
+| LangSmith | [tracing-1](docs/tracing/tracing-1.png) 전체 트리 · 최종 상태 / [tracing-2](docs/tracing/tracing-2.png) 근거 부족 셀 재작업 결정(step 4, `decision` · `reason` · `rework_request`) / [tracing-3](docs/tracing/tracing-3.png) 평가 fail → 하위 에이전트 재조사(step 15, `eval_attempts` · 비운 `synthesis` · `report_uri`) / [tracing-4](docs/tracing/tracing-4.png) `end_with_warning` 종료 |
+
+같은 실행의 상세(라우팅 순서 · 셀별 판정 · 재작업 회차별 변화)는 `uv run python -m graph.run_summary 20261007-180300-9eeda6` 로 다시 볼 수 있다 (`outputs/` 의 로그 기준).
+앞선 실제 실행 2회(`20261007-163346-6f027b` · `20261007-164001-e33f18`)는 예산 실측(#102)과 문제 발견(#115 ~ #117 · #120 · #121 · #130)에 썼다.
 
 RAG 과제(`main`)의 Run Record 는 [main 브랜치 README](https://github.com/TurtleNeck-Crew-RAG/kvcache-agentic-rag/tree/main#run-record--전체-실행-2026-09-22-7회차--제출본) 에 있다.
 
@@ -204,7 +208,7 @@ RAG 과제(`main`)의 Run Record 는 [main 브랜치 README](https://github.com/
 
 * **재작업 순서를 공정하게 — 라운드 로빈** : 처음 게이트는 같은 단계 안에서 앞 셀이 재작업 1 · 2회를 연속으로 가져가, 예산이 바닥나면 순서상 마지막인 도메인 셀이 먼저 잘리는 구조였다. 재작업 횟수가 적은 셀부터 고르도록 바꾸자(#110) 실측에서 부족 셀 6개가 모두 1회씩 받은 뒤 2회째로 넘어갔다. 그리고 예산이 모자라도 종합 · 보고서 · 평가는 끝까지 가도록 마무리 예약분(`FINAL_RESERVE`)을 남겼다.
 
-* **재작업 횟수보다 "재작업이 판정을 바꿀 수 있는가"가 먼저** : 실측 2회 모두 재작업 10 · 12회가 부족 셀을 하나도 해소하지 못했다(해소 0/5 · 0/6). 원인은 상한 값이 아니라 ① 규칙의 오판정(웹 출처 뒤 `[추론]` 을 추론 단독으로 봄, #115) ② 같은 질의가 같은 논문 페이지를 다시 가져오는 검색 전략(#116) ③ 보고서 재작성으로는 바뀌지 않는 4장(워커 결과 렌더링)에 판단 문장의 78%가 있는 구조(#117)였다. 그래서 `MAX_REWORK` 를 줄이는 결정은 이 셋을 고친 뒤로 미뤘다 — 버그 때문에 상한을 깎지 않기 위해서다. 평가 루프의 되돌릴 곳(`targets`)은 **실패한 문장을 만든 노드**를 가리켜야 한다.
+* **재작업 횟수보다 "재작업이 판정을 바꿀 수 있는가"가 먼저** : 실측 2회 모두 재작업 10 · 12회가 부족 셀을 하나도 해소하지 못했다(해소 0/5 · 0/6). 원인은 상한 값이 아니라 ① 규칙의 오판정(웹 출처 뒤 `[추론]` 을 추론 단독으로 봄, #115) ② 같은 질의가 같은 논문 페이지를 다시 가져오는 검색 전략(#116) ③ 보고서 재작성으로는 바뀌지 않는 4장(워커 결과 렌더링)에 판단 문장의 78%가 있는 구조(#117)였다. 그래서 `MAX_REWORK` 를 줄이는 결정은 이 셋을 고친 뒤로 미뤘다 — 버그 때문에 상한을 깎지 않기 위해서다. 셋을 고친 최종 실행(`20261007-180300-9eeda6`)에서 처음으로 재작업이 셀을 해소했다(domain:KIVI, 1회차에 웹 반례 확보). 남은 부족 셀은 대부분 **한 출처에 몰리는 웹 검색 결과**(github.com · huggingface.co)라 질의를 바꿔도 2회째가 판정을 바꾸지 못했다 — 2회째 재작업의 해소는 0/4. 평가 루프의 되돌릴 곳(`targets`)은 **실패한 문장을 만든 노드**를 가리켜야 하고(#129), 그래서 최종 실행의 평가 루프는 보고서 재작성이 아니라 기술 조사 재조사로 갔다.
 
 * **LangGraph 는 스키마 밖 키를 조용히 버린다** : 리듀서 없는 키에 같은 슈퍼스텝에서 두 노드가 쓰면 `InvalidUpdateError` 로 멈추지만, **State 스키마에 없는 키를 반환하면 에러 없이 값이 사라진다**(langgraph 1.2.12 실측). 워커 계약(자기 출력 키 + `citations` + `llm_calls`)을 `graph/state.py` 한 곳에 두고 키 추가는 계약 PR 로만 한 이유다.
 
