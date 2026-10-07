@@ -19,7 +19,7 @@ from collections import Counter
 from typing import Any
 
 from graph import observe
-from graph.supervisor import FINAL_RESERVE, LLM_BUDGET, TOKEN_BUDGET
+from graph.supervisor import FINAL_RESERVE, TOKEN_BUDGET
 
 
 def _load(name: str) -> Any:
@@ -109,7 +109,7 @@ def to_markdown(s: dict[str, Any]) -> str:
                 f"| Supervisor 라우팅 | {s['routing_count']}회 (step_count {run.get('step_count')}) |",
                 f"| 셀 재작업 | {s['rework_total']}회 — {', '.join(f'{c} ×{n}' for c, n in s['reworks'].items()) or '없음'} |",
                 f"| 평가 루프 | {s['eval_loops']}회 (eval_attempts {run.get('eval_attempts')}) |",
-                f"| LLM 호출 | {run.get('llm_calls')} / LLM_BUDGET {LLM_BUDGET} |",
+                f"| LLM 호출 | {run.get('llm_calls')} |",
                 f"| 토큰 | {run.get('tokens')} / TOKEN_BUDGET {TOKEN_BUDGET} (마무리 예약 {FINAL_RESERVE}) |",
                 f"| 웹 검색 (Tavily) | {sum(s['web_calls'].values())}회 — {web} |",
                 f"| 소요 | {run.get('elapsed_sec')}초 |", ""]

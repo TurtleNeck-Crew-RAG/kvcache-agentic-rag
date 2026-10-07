@@ -103,7 +103,7 @@ def test_web_calls_counted_per_node(_out):
 def test_tokens_and_budgets_shown(_out):
     _write(_out, "run.json", {"trace_id": "T", "llm_calls": 120, "tokens": 345678})
     md = rs.to_markdown(rs.summarize())
-    assert "| 토큰 | 345678 / TOKEN_BUDGET" in md and "LLM_BUDGET" in md
+    assert "| 토큰 | 345678 / TOKEN_BUDGET" in md and "LLM_BUDGET" not in md      # 호출 수 상한 제거 (#102)
 
 
 def test_gap_change_is_not_improvement(_out):

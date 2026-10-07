@@ -17,7 +17,7 @@ supervisor(state) 는 판정 결과(sufficiency · eval_result) · 시도 횟수
   7. 평가 fail 소진                              → end_with_warning
 
 예산(#102) — 재작업 · 평가 루프는 "마무리(종합 · 보고서 · 평가) 예약분을 남기고도 예산 안"일 때만.
-예산이 바닥나도 보고서는 끝까지 만든다. 단위는 토큰(safe.py 가 노드마다 집계), 호출 수는 병행 안전망.
+예산이 바닥나도 보고서는 끝까지 만든다. 단위는 토큰(safe.py 가 노드마다 집계). 호출 수(llm_calls)는 보고용.
 시간 제한은 게이트가 아니라 app.py 의 RUN_TIMEOUT — 게이트가 시계를 읽으면 같은 State 에서 다른 결정이 나온다.
 
 결정 사유는 observe.log_decision() 으로 State 밖에 남긴다 (A 소유 — 없으면 아래 fallback).
@@ -52,12 +52,11 @@ BASE_TURNS = len(WORKERS) + 3                                       # 수집 4 +
 MAX_STEPS = BASE_TURNS + CELLS * MAX_REWORK + MAX_EVAL * 3 + 1      # 7 + 16 + 6 + 1 = 30 (평가 루프 1회 ≤ 재조사 · 종합 · 보고서)
 RECURSION_LIMIT = 3 * MAX_STEPS + 10                                # 턴당 노드 ≤3 (supervisor → 워커 → assess/evaluator)
 
-# 예산 (#102) — ⚠️ 잠정값. 첫 실제 실행의 노드별 토큰으로 확정한다:
-#   TOKEN_BUDGET = (기본 경로 + Σ부족셀 재작업단가[worker] + assess 재판정 + 평가 루프 1회 × MAX_EVAL) × 1.2~1.5
-#   FINAL_RESERVE = synthesis 1회 + report 4회 + evaluator(LLM Judge 포함) 1회
-TOKEN_BUDGET = 600_000    # 잠정 — RAG 실행 ~100회 × 호출당 ~3K 토큰 + 재작업 여유
-FINAL_RESERVE = 80_000    # 잠정 — 넘으면 재작업 · 평가 루프를 멈추고 남은 예산으로 마무리
-LLM_BUDGET = 150          # 호출 수 안전망 (#29) — 토큰 예산 확정 후 제거 여부 결정
+# 예산 (#102) — 실측 2회(20261007-163346-6f027b · 20261007-164001-e33f18) 기준. 두 실행 모두 재작업 · 평가 루프를
+# 다 쓴 최악에 가까운 경로였다 (토큰 381k · 397k, LLM 호출 132 · 141).
+TOKEN_BUDGET = 600_000    # 최대 실측 397k × 1.5 ≈ 596k
+FINAL_RESERVE = 80_000    # synthesis 19k + report 21k + evaluator 2k ≈ 42k (노드별 실측) 의 약 2배 — 넘으면 재작업 · 평가 루프를 멈추고 마무리
+# 호출 수 상한(LLM_BUDGET 150, #29)은 제거 — 토큰이 비용 단위가 됐고, 실측 141회로 표본 편차만으로 토큰보다 먼저 걸렸다
 PAYLOAD = {"tech_research": "tech_summary", "market": "market_eval",
            "stakeholder": "stakeholder_eval", "domain": "domain_eval"}
 
@@ -79,9 +78,7 @@ def _has_report(state: GraphState) -> bool:
 
 def _budget(state: GraphState) -> tuple[bool, str]:
     """재작업 · 평가 루프를 더 허용하는가 (허용, 막힌 사유). 마무리 예약분을 남겨 둔다."""
-    calls, tokens = state.get("llm_calls", 0), state.get("tokens", 0)
-    if calls > LLM_BUDGET:
-        return False, f"llm_calls {calls} > LLM_BUDGET {LLM_BUDGET}"
+    tokens = state.get("tokens", 0)
     if tokens + FINAL_RESERVE > TOKEN_BUDGET:
         return False, f"tokens {tokens} + FINAL_RESERVE {FINAL_RESERVE} > TOKEN_BUDGET {TOKEN_BUDGET}"
     return True, ""
