@@ -17,6 +17,7 @@ from graph.state import Eval, Ref, Tech
 
 # State의 확정된 기술 집합. SDK 없이도 워커를 로드할 수 있다.
 TECHS = get_args(Tech)
+ACADEMIC_DOMAINS = ("arxiv.org", "dl.acm.org", "usenix.org", "proceedings.mlr.press")
 
 
 class Claim(BaseModel):
@@ -50,7 +51,7 @@ def generator(schema):
 
 
 def search(queries: list[str], *, node: str = "", trace_id: str = "") -> tuple[dict[str, dict], list[str]]:
-    """질의마다 Tavily 1회. 횟수는 observe.log_web 으로 외부 로그 (#102) — 실패한 질의도 0건으로 남긴다."""
+    """B 관점용 웹 검색. 논문 원문은 기술 조사에 있으므로 시장·이해관계자 근거에서 제외한다."""
     from graph.observe import log_web
 
     sources, notes = {}, []
@@ -64,6 +65,7 @@ def search(queries: list[str], *, node: str = "", trace_id: str = "") -> tuple[d
             response = client.search(
                 query=query, search_depth="advanced", max_results=5,
                 include_answer=False, include_raw_content=False, timeout=20,
+                exclude_domains=list(ACADEMIC_DOMAINS),
             )
             results = response["results"]
             if not isinstance(results, list):
@@ -77,6 +79,9 @@ def search(queries: list[str], *, node: str = "", trace_id: str = "") -> tuple[d
                     continue
                 parsed = urlsplit(url)
                 if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    continue
+                host = (parsed.hostname or "").removeprefix("www.").casefold()
+                if any(host == domain or host.endswith("." + domain) for domain in ACADEMIC_DOMAINS):
                     continue
                 snippet = content[:3000]
                 if url in sources:

@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import re
 from copy import deepcopy
 from typing import Literal
 
@@ -31,8 +30,17 @@ class StakeholderResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
-def queries(tech: str, *, negative_only: bool = False, hint_query: str = "") -> list[str]:
-    if negative_only:
+def queries(tech: str, *, negative_only: bool = False, hint_query: str = "", gap: str = "") -> list[str]:
+    if gap in {"source_bias", "source_diversity", "off_topic"}:
+        competitor = "TurboQuant KVTC" if tech == "KIVI" else '"LLM in a flash" "LPDDR-PIM"'
+        base = [
+            f'"{tech}" KV cache company engineering blog production adoption',
+            f'"{tech}" KV cache developer community GitHub issues experience',
+            f'"{tech}" KV cache media analyst investor reaction',
+            f'"{tech}" KV cache {competitor} independent comparison',
+            f'"{tech}" KV cache deployment case study vendor ecosystem',
+        ]
+    elif negative_only:
         base = [
             f'"{tech}" KV cache criticism limitations adoption barriers accuracy overhead',
             f'"{tech}" KV cache site:github.com issues unresolved compatibility reproduction failures',
@@ -93,21 +101,26 @@ def _evaluate(response: StakeholderResponse, sources: dict) -> tuple[dict, list]
 def _merge(previous: dict, fresh: dict) -> dict:
     """반대 근거 재검색이 기존의 찬성 근거·출처를 지우지 않게 병합한다."""
     result = deepcopy(fresh)
-    if not previous:
-        return result
     for key in ("positives", "negatives", "evidence"):
-        merged, seen = [], set()
-        for item in previous[key] + fresh[key]:
+        merged, seen_texts, seen_quotes = [], set(), set()
+        for item in previous.get(key, []) + fresh[key]:
             if item == FAILURE or item in merged:
                 continue
             if key == "negatives":
-                match = re.search(r"\(원문: (.*)\) \[웹 (https?://[^\s\]]+)\]$", item, re.DOTALL)
-                identity = (" ".join(match[1].split()).casefold(), match[2]) if match else item
-                if identity in seen:
+                # 표현이나 URL만 달라진 동일 주장·동일 원문을 별도 근거로 세지 않는다.
+                text, separator, remainder = item.partition(" (원문:")
+                quote = remainder.rsplit(") [웹 ", 1)[0] if separator else ""
+                text_key = " ".join(text.split()).casefold()
+                quote_key = " ".join(quote.split()).casefold()
+                if text_key in seen_texts or (quote_key and quote_key in seen_quotes):
                     continue
-                seen.add(identity)
+                seen_texts.add(text_key)
+                if quote_key:
+                    seen_quotes.add(quote_key)
             merged.append(item)
         result[key] = merged
+    if not previous:
+        return result
     result["rationale"] = "이전 평가:\n" + previous["rationale"] + "\n재검색 결과:\n" + fresh["rationale"]
     if fresh["grade"] == "평가 불가":
         result["grade"] = previous["grade"]
@@ -141,10 +154,12 @@ def _finish(result: dict, exhausted: bool) -> None:
             web.add_note(result, "반대 근거 2건 미만 — 재검색 필요")
 
 
-def _attempt(tech: str, summary: dict, *, negative_only: bool, hint_query: str,
+def _attempt(tech: str, summary: dict, *, negative_only: bool, hint_query: str, gap: str,
              attempt: int, previous: dict, trace_id: str = "") -> tuple[dict, list, int]:
-    sources, notes = web.search(queries(tech, negative_only=negative_only, hint_query=hint_query),
-                                node="stakeholder", trace_id=trace_id)
+    sources, notes = web.search(
+        queries(tech, negative_only=negative_only, hint_query=hint_query, gap=gap),
+        node="stakeholder", trace_id=trace_id,
+    )
     calls, refs = 0, []
     if not sources:
         result = web.blank("이해관계자 웹 근거 없음")
@@ -181,6 +196,7 @@ def run(state: GraphState) -> dict:
                 tech, summary,
                 negative_only=is_rework and gap == "negatives",
                 hint_query=hint_query,
+                gap=gap,
                 attempt=attempt,
                 previous=previous,
                 trace_id=state.get("trace_id", ""),

@@ -69,6 +69,20 @@ def test_rework_runs_only_requested_technology_with_hint_query(monkeypatch):
     assert json.loads(prompts[0][1][1])["tech"] == "InfiniGen"
 
 
+def test_source_bias_rework_uses_industry_queries_and_excludes_paper_domains(monkeypatch):
+    queries, _ = install(monkeypatch, response)
+    current = state()
+    current["rework_request"] = {
+        "worker": "market", "tech": "KIVI", "gap": "source_bias", "hint_query": "출처 편중",
+    }
+
+    market.run(current)
+
+    assert len(queries) == 4
+    assert any("company deployment" in q["query"] for q in queries)
+    assert all(q["exclude_domains"] == list(web.ACADEMIC_DOMAINS) for q in queries)
+
+
 def test_rework_request_for_another_worker_is_ignored(monkeypatch):
     queries, prompts = install(monkeypatch, response)
     current = state()
@@ -183,6 +197,23 @@ def test_search_deduplicates_and_combines_snippets(monkeypatch):
     sources, notes = web.search(["one", "two"])
     assert len(sources) == 1 and not notes
     assert sources[source("KIVI")["url"]]["content"] == "first quote\nsecond quote"
+
+
+def test_search_defensively_filters_academic_results(monkeypatch):
+    seen = []
+
+    def search(**kwargs):
+        seen.append(kwargs)
+        return {"results": [
+            {"url": "https://arxiv.org/abs/2402.02750", "content": "paper"},
+            {"url": "https://blog.example.com/kivi", "content": "deployment"},
+        ]}
+
+    monkeypatch.setattr(web, "search_client", lambda: SimpleNamespace(search=search))
+    sources, notes = web.search(["KIVI deployment"])
+
+    assert not notes and list(sources) == ["https://blog.example.com/kivi"]
+    assert seen[0]["exclude_domains"] == list(web.ACADEMIC_DOMAINS)
 
 
 def test_excerpt_ids_resolve_to_verbatim_source_and_unknown_ids_are_rejected():
