@@ -1,37 +1,86 @@
-"""Graph 조립 — Branching(fan-out/fan-in) + Loop (설계서 5.3).  [소유: D 황재원]
+"""Graph 조립 — Supervisor (Hybrid 판정 + 결정론 게이트) · docs/ROLES.md 0절.  [소유: D 황재원]
 
-인덱싱 → 1 기술 조사 → 2 평가 3개 병렬 → 3 종합(+중립성 Judge) → 4 보고서
-모든 워커는 END 로 직행하지 않고 dispatcher 로 되돌아온다.
+START → supervisor ─route()─┬─ tech_research · market · stakeholder · domain ─→ assess ─→ supervisor
+                            ├─ synthesis ─────────────────────────────────────────────→ supervisor
+                            ├─ report ─→ evaluator ───────────────────────────────────→ supervisor
+                            ├─ end_with_warning → END
+                            └─ END
+
+- 워커끼리 직접 잇지 않는다. 전부 판정 노드 또는 supervisor 로 복귀 — 다음 노드는 supervisor 만 정한다
+- 매 턴 워커 1명 (fan-out 없음)
+- 체크포인터를 넘기면 매 슈퍼스텝 State 가 저장된다. thread_id = trace_id (app.py)
 """
 from __future__ import annotations
 
-from langgraph.graph import END, StateGraph
+import sys
+from collections.abc import Callable
 
-from agents import domain, market, report, stakeholder, synthesis, tech_research
-from graph.dispatcher import dispatcher, route
+from langgraph.graph import END, START, StateGraph
+
 from graph.safe import safe
 from graph.state import GraphState
+from graph.supervisor import NEXT_NODES, end_with_warning, route, supervisor
 
-WORKERS = {
-    "tech_research": tech_research.run,
-    "market": market.run,
-    "stakeholder": stakeholder.run,
-    "domain": domain.run,
-    "synthesis": synthesis.run,     # 내부에서 중립성 Judge 호출 → neutrality 키 기록
-    "report": report.run,
-}
+Node = Callable[[dict], dict]
+CELL_WORKERS = ("tech_research", "market", "stakeholder", "domain")   # → assess (충분성 판정)
 
 
-def build_graph():
+def default_workers() -> dict[str, Node]:
+    # 여기서 import — agents.* 는 rag.* (chromadb · FlagEmbedding) 를 끌어온다. 테스트는 workers 를 주입한다
+    from agents import domain, market, report, stakeholder, synthesis, tech_research
+    return {
+        "tech_research": tech_research.run,
+        "market": market.run,
+        "stakeholder": stakeholder.run,
+        "domain": domain.run,
+        "synthesis": synthesis.run,
+        "report": report.run,
+    }
+
+
+def _pending(name: str) -> Node:
+    """판정 노드가 아직 머지되지 않았을 때의 자리 — 판정을 쓰지 않는다 (판정 없음 = 재작업 · 평가 루프 없음)."""
+    def node(state: dict) -> dict:
+        print(f"[{name}] 미연결 — 판정 없이 통과", file=sys.stderr)
+        return {}
+    node.__name__ = f"pending_{name}"
+    return node
+
+
+def default_judges() -> tuple[Node, Node]:
+    try:
+        from graph.sufficiency import assess  # A
+    except ImportError:
+        assess = _pending("assess")
+    try:
+        from agents.evaluator import run as evaluator  # C
+    except ImportError:
+        evaluator = _pending("evaluator")
+    return assess, evaluator
+
+
+def build_graph(workers: dict[str, Node] | None = None, assess: Node | None = None,
+                evaluator: Node | None = None, checkpointer=None):
+    workers = workers or default_workers()
+    if assess is None or evaluator is None:
+        a, e = default_judges()
+        assess, evaluator = assess or a, evaluator or e
+
     g = StateGraph(GraphState)
-    g.add_node("dispatcher", dispatcher)
-    for name, fn in WORKERS.items():
-        g.add_node(name, safe(name, fn))        # 예외 → 자기 키의 실패 기록 (graph/safe.py)
-        g.add_edge(name, "dispatcher")          # 전부 dispatcher 로 수렴
+    g.add_node("supervisor", supervisor)
+    g.add_node("assess", safe("assess", assess))
+    g.add_node("evaluator", safe("evaluator", evaluator))
+    g.add_node("end_with_warning", end_with_warning)
+    for name, fn in workers.items():
+        g.add_node(name, safe(name, fn))         # 예외 → 실패 기록 + node_status failed (graph/safe.py)
+        g.add_edge(name, "assess" if name in CELL_WORKERS else "evaluator" if name == "report" else "supervisor")
 
-    g.set_entry_point("dispatcher")
-    g.add_conditional_edges("dispatcher", route, [*WORKERS.keys(), END])
-    return g.compile()
+    g.add_edge(START, "supervisor")
+    g.add_conditional_edges("supervisor", route, list(NEXT_NODES))
+    g.add_edge("assess", "supervisor")
+    g.add_edge("evaluator", "supervisor")
+    g.add_edge("end_with_warning", END)
+    return g.compile(checkpointer=checkpointer)
 
 
 if __name__ == "__main__":

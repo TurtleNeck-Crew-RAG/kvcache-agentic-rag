@@ -1,12 +1,14 @@
 """실행 스크립트 — python app.py  [소유: D 황재원]
 
-1. config/domain.yaml · config/selection.yaml 로드 → init_state
+1. config/domain.yaml · config/selection.yaml 로드 → trace_id 생성 → init_state
 2. 인덱스(data/index/)가 없으면 rag.indexing.build_index()  (--skip-index 로 건너뜀)
-3. graph 를 stream 으로 실행 (recursion_limit 40 — 안전망) — 노드가 끝날 때마다 마지막 State 를 붙잡아 둔다
-4. 실패해도 남는 것: outputs/run.json(어디까지 갔나 · llm_calls · retry) + retrieval_log · citations · synthesis · trl_estimate JSON
-5. report_md 가 있으면 outputs/report/report.md (+ PDF, weasyprint 있을 때)
+3. graph 를 stream 으로 실행 — thread_id = trace_id (체크포인터) · LangSmith metadata.trace_id 같은 값 · recursion_limit = RECURSION_LIMIT
+4. 실패해도 남는 것: outputs/run.json(trace_id · 어디까지 갔나 · step_count · retry · eval_attempts · llm_calls · node_status)
+   + 채워진 키의 JSON (체크포인터의 마지막 State 기준)
+5. 보고서: report_uri (B 이행 후) 또는 report_md → outputs/report/report.md (+ PDF, weasyprint 있을 때)
 
 옵션: --skip-index  인덱싱 건너뜀 / --pdf-name <파일명>  제출용 PDF 이름
+      --resume <trace_id>  체크포인트에서 이어서 실행 (SqliteSaver — langgraph-checkpoint-sqlite 가 있을 때만 프로세스를 넘어 재개)
 """
 from __future__ import annotations
 
@@ -15,6 +17,8 @@ import json
 import os
 import sys
 import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -22,11 +26,35 @@ from dotenv import load_dotenv
 
 from graph.build import build_graph
 from graph.state import init_state
+from graph.supervisor import MAX_STEPS, RECURSION_LIMIT
 
 OUT = Path("outputs")
 INDEX_DIR = Path("data/index")
-DUMP_KEYS = ("retrieval_log", "citations", "synthesis", "trl_estimate", "tech_summary",
-             "market_eval", "stakeholder_eval", "domain_eval", "neutrality")
+CHECKPOINT_DB = OUT / "checkpoints.sqlite"
+DUMP_KEYS = ("citations", "synthesis", "trl_estimate", "tech_summary", "market_eval", "stakeholder_eval",
+             "domain_eval", "sufficiency", "eval_result", "errors",
+             "retrieval_log", "neutrality")        # 마지막 둘은 이행 중 키 (graph/state.py)
+
+
+def new_trace_id() -> str:
+    try:
+        from graph.observe import new_trace_id as observe_new  # A
+        return observe_new()
+    except ImportError:
+        return f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
+
+
+def make_checkpointer():
+    """(checkpointer, 프로세스를 넘어 재개 가능한가). SqliteSaver 가 없으면 InMemorySaver — 같은 프로세스 안에서만 남는다."""
+    try:
+        import sqlite3
+
+        from langgraph.checkpoint.sqlite import SqliteSaver
+    except ImportError:
+        from langgraph.checkpoint.memory import InMemorySaver
+        return InMemorySaver(), False
+    OUT.mkdir(parents=True, exist_ok=True)
+    return SqliteSaver(sqlite3.connect(CHECKPOINT_DB, check_same_thread=False)), True
 
 
 def _dump(state: dict, visited: list[str], error: str | None, elapsed: float) -> None:
@@ -38,9 +66,16 @@ def _dump(state: dict, visited: list[str], error: str | None, elapsed: float) ->
     (OUT / "run.json").write_text(json.dumps({
         "ok": error is None,
         "error": error,
-        "visited": visited,                       # Dispatcher 결정 순서 — 규칙표대로 갔는지 확인 (병렬은 " | " 로 묶임)
+        "trace_id": state.get("trace_id"),
+        "status": state.get("status"),
+        "visited": visited,                       # 실행된 노드 순서 (supervisor 제외) — 재작업 · 평가 루프가 몇 번 돌았는지
+        "step_count": state.get("step_count"),
         "llm_calls": state.get("llm_calls"),
         "retry": state.get("retry"),
+        "eval_attempts": state.get("eval_attempts"),
+        "node_status": state.get("node_status"),
+        "last_error": state.get("last_error"),
+        "report_uri": state.get("report_uri"),
         "elapsed_sec": round(elapsed, 1),
         "keys_filled": sorted(k for k in DUMP_KEYS if state.get(k)),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -54,10 +89,21 @@ def _ensure_index(skip: bool) -> None:
     build_index()
 
 
+def _save_report(state: dict, visited: list[str]) -> None:
+    from agents import report  # weasyprint 는 선택 의존성 — 여기서만 import
+    if state.get("report_md"):                    # 이행 중 — report_md 를 파일로 (fallback · end_with_warning 이 고친 본문 포함)
+        md = report.OUT_DIR / "report.md"
+        if not md.exists() or md.read_text(encoding="utf-8") != state["report_md"]:
+            report.save(state["report_md"])
+    elif state.get("report_uri") and "end_with_warning" in visited:
+        report.to_pdf(Path(state["report_uri"]))  # 자동 경고 절이 붙은 md 로 PDF 를 다시 만든다
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-index", action="store_true")
-    ap.add_argument("--pdf-name", default=None, help="예: RAG-Output_판교_10반_박유진+황재원+민영은+심준용.pdf")
+    ap.add_argument("--pdf-name", default=None, help="예: Agent-Output_판교_10반_박유진+황재원+민영은+심준용.pdf")
+    ap.add_argument("--resume", metavar="TRACE_ID", default=None, help="체크포인트에서 이어서 실행")
     args = ap.parse_args(argv)
 
     load_dotenv()
@@ -67,33 +113,47 @@ def main(argv: list[str] | None = None) -> int:
     selected = yaml.safe_load(Path("config/selection.yaml").read_text(encoding="utf-8"))
     _ensure_index(args.skip_index)
 
-    app = build_graph()
-    state: dict = dict(init_state(domain, selected))
+    checkpointer, durable = make_checkpointer()
+    if args.resume and not durable:
+        print("--resume 은 SqliteSaver 가 필요합니다 (uv add langgraph-checkpoint-sqlite)", file=sys.stderr)
+        return 2
+    app = build_graph(checkpointer=checkpointer)
+    trace_id = args.resume or new_trace_id()
+    config = {
+        "configurable": {"thread_id": trace_id},  # 체크포인터 키 = trace_id
+        "metadata": {"trace_id": trace_id},       # LangSmith run metadata — 같은 값으로 검색
+        "run_name": f"kvcache-agent {trace_id}",
+        "recursion_limit": RECURSION_LIMIT,
+    }
+    inputs = None if args.resume else init_state(domain, selected, trace_id=trace_id, max_steps=MAX_STEPS)
+    print(f"trace_id={trace_id}" + ("  (resume)" if args.resume else ""))
+
     visited: list[str] = []
     error: str | None = None
     t0 = time.time()
     try:
-        # stream_mode="values" — 슈퍼스텝마다 전체 State 가 온다. 중간에 죽어도 마지막 것을 갖는다
-        for step in app.stream(state, config={"recursion_limit": 40}, stream_mode="values"):
-            state = step
-            nxt = " | ".join(state.get("next") or [])   # Dispatcher 가 정한 다음 노드(들). 병렬이면 "market | stakeholder | domain"
-            if nxt and (not visited or visited[-1] != nxt):
-                visited.append(nxt)
+        for chunk in app.stream(inputs, config=config, stream_mode="updates"):
+            visited.extend(n for n in chunk if n != "supervisor")
+    except KeyboardInterrupt:
+        error = "KeyboardInterrupt"
+        print(f"graph: 중단 — python app.py --resume {trace_id}", file=sys.stderr)
     except Exception as e:                        # noqa: BLE001 — 어디서 깨졌는지 남기는 게 목적
         error = f"{type(e).__name__}: {e}"
-        print(f"graph: 실패 — {error}", file=sys.stderr)
+        print(f"graph: 실패 — {error}  (재개: python app.py --resume {trace_id})", file=sys.stderr)
+    state = dict(app.get_state(config).values)    # 체크포인터의 마지막 State — 중간에 죽어도 남는다
+    if error:
+        state["status"] = "INTERRUPTED" if error == "KeyboardInterrupt" else "FAILED"
     _dump(state, visited, error, time.time() - t0)
 
-    if state.get("report_md"):
-        from agents import report  # weasyprint 는 선택 의존성 — 여기서만 import
-        md = report.OUT_DIR / "report.md"
-        if not md.exists() or md.read_text(encoding="utf-8") != state["report_md"]:
-            report.save(state["report_md"])       # 워커가 실패 기록(fallback)이라 저장을 못 했을 때만
+    if state.get("report_md") or state.get("report_uri"):
+        _save_report(state, visited)
     else:
-        print("report_md 없음 — outputs/run.json 의 visited · error 확인", file=sys.stderr)
+        print("보고서 없음 — outputs/run.json 의 visited · error 확인", file=sys.stderr)
 
-    print(f"llm_calls={state.get('llm_calls')}  retry={state.get('retry')}  visited={len(visited)}  → outputs/run.json")
-    return 0 if error is None and state.get("report_md") else 1
+    print(f"trace_id={trace_id}  status={state.get('status')}  step_count={state.get('step_count')}  "
+          f"llm_calls={state.get('llm_calls')}  retry={state.get('retry')}  eval_attempts={state.get('eval_attempts')}"
+          "  → outputs/run.json")
+    return 0 if error is None and state.get("status") == "SUCCESS" else 1
 
 
 if __name__ == "__main__":
