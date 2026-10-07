@@ -203,11 +203,15 @@ def render_selection(selected: dict[str, Any]) -> str:
 # ---------- 4. 관점별 평가 (*_eval · trl_estimate) ----------
 
 def _nearest_tags(parts: list[str], index: int) -> list[str]:
-    """문단 끝 태그만 앞 문장에 전달한다. 앞 태그를 뒤 추론에 빌려주지는 않는다."""
-    for candidate in range(index + 1, len(parts)):
-        tags = TAG_TOKEN_RE.findall(parts[candidate])
-        if tags:
-            return list(dict.fromkeys(tags))
+    """유일한 문단 끝 태그만 앞 문장에 전달한다. 중간 문장의 태그는 빌리지 않는다."""
+    tagged = [i for i, part in enumerate(parts) if TAG_TOKEN_RE.search(part)]
+    if not tagged or tagged[-1] != len(parts) - 1:
+        return []
+    terminal = parts[-1]
+    tag_only = not TAG_TOKEN_RE.sub("", terminal).strip(" .,;")
+    previous_tag = tagged[-2] if len(tagged) > 1 else -1
+    if len(tagged) == 1 or (tag_only and index > previous_tag):
+        return list(dict.fromkeys(TAG_TOKEN_RE.findall(terminal)))
     return []
 
 
@@ -230,12 +234,18 @@ def _grounded_text(text: str) -> str:
         if line == "근거 없음":
             lines.append(line)
             continue
+        if line.endswith(":"):
+            lines.append(line)
+            continue
         parts = [part.strip() for part in SENTENCE_RE.split(line) if part.strip()]
         grounded = []
         for index, part in enumerate(parts):
+            if not TAG_TOKEN_RE.sub("", part).strip(" .,;"):
+                continue
             tags = TAG_TOKEN_RE.findall(part) or _nearest_tags(parts, index) or ["[추론]"]
             grounded.append(_place_tags(part, tags))
-        lines.append(" ".join(grounded))
+        if grounded:
+            lines.append(" ".join(grounded))
     return "\n".join(lines) or "근거 없음"
 
 

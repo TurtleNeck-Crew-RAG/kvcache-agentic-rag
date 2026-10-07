@@ -135,7 +135,10 @@ def test_evaluation_keeps_tags_per_claim_and_omits_raw_quotes():
     s["stakeholder_eval"] = {
         "KIVI": {
             "grade": "중립", "rationale": (
+                "이전 평가:\n"
                 "첫 판단이다. 두 번째 판단이다. [웹 https://a.example/x]\n"
+                "재검색 결과:\n"
+                "A 판단이다. B 판단이다 [논문 p.3]. C 판단이다 [웹 https://c.example/x].\n"
                 "공개 구현이 있다 [웹 https://github.com/x]. 폰 대역폭에서는 지연이 클 것이다."
             ),
             "positives": ["근거 없는 장황한 긍정", "투자자 반응 미확인 [추론]"],
@@ -153,8 +156,13 @@ def test_evaluation_keeps_tags_per_claim_and_omits_raw_quotes():
 
     assert records and all(_source_kinds(record.text) for record in records)
     assert "(원문:" not in md
+    assert md.count("https://b.example/y") == 1
     assert "근거 없는 장황한 긍정 [추론]" in md
     assert "투자자 반응 미확인 [추론]" in md
+    assert "이전 평가:" in md and "이전 평가: [추론]" not in md
+    assert "재검색 결과:" in md and "재검색 결과: [추론]" not in md
+    assert "A 판단이다 [추론]." in md
+    assert "A 판단이다 [논문 p.3]" not in md
     assert "폰 대역폭에서는 지연이 클 것이다 [추론]." in md
     assert "폰 대역폭에서는 지연이 클 것이다 [웹" not in md
     assert "반대 근거 확보 실패 [추론]" in md and "반대 근거 확보 실패 [추론]" in compact
