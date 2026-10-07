@@ -1,5 +1,7 @@
-"""최종 보고서 evaluator 규칙층 — LLM 없이 실행한다."""
+"""최종 보고서 evaluator — 규칙층은 LLM 없이, Judge 층은 LLM 을 mock 해서 실행한다."""
 from copy import deepcopy
+
+import pytest
 
 from agents import evaluator
 from graph.state import init_state
@@ -115,15 +117,62 @@ InfiniGen은 KV cache를 오프로딩한다 [논문 p.1].
 """
 
 
-def test_run_passes_complete_grounded_report(tmp_path):
+class FakeJudge:
+    """with_structured_output(...).invoke(prompt) 를 흉내 낸다. 문제 id 만 지정하고 나머지는 통과로 채운다."""
+
+    def __init__(self, claims=None, violations=None):
+        self.claims = claims or {}          # id → ("overstated" | "unsupported", feedback)
+        self.violations = violations or {}  # id → feedback
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, schema):
+        assert schema is evaluator.EvaluatorJudgeOutput
+        return self
+
+    def invoke(self, prompt: str):
+        self.prompts.append(prompt)
+        payload = evaluator.json.loads(prompt.split("## 검증 대상\n", 1)[1])
+        return {
+            "claims": [
+                {"id": c["id"], "problem": self.claims.get(c["id"], ("none", ""))[0],
+                 "feedback": self.claims.get(c["id"], ("none", ""))[1]}
+                for c in payload["claims"]
+            ],
+            "neutrality": [
+                {"id": n["id"], "violation": n["id"] in self.violations, "feedback": self.violations.get(n["id"], "")}
+                for n in payload["neutrality"]
+            ],
+        }
+
+
+@pytest.fixture
+def fake_judge(monkeypatch):
+    def install(**kwargs) -> FakeJudge:
+        fake = FakeJudge(**kwargs)
+        monkeypatch.setattr(evaluator, "llm", lambda role: fake)
+        return fake
+    return install
+
+
+def _run(tmp_path, markdown: str, state=None) -> dict:
     path = tmp_path / "report.md"
-    path.write_text(_report(), encoding="utf-8")
-    state = _state()
+    path.write_text(markdown, encoding="utf-8")
+    state = state or _state()
     state["report_uri"] = path.as_posix()
+    return evaluator.run(state)
 
-    result = evaluator.run(state)
 
-    assert result["llm_calls"] == 0
+def _claim_id(markdown: str, needle: str) -> str:
+    claims = evaluator.judge_claims(markdown)
+    return next(f"C{i}" for i, c in enumerate(claims, 1) if needle in c.text)
+
+
+def test_run_passes_complete_grounded_report(tmp_path, fake_judge):
+    judge = fake_judge()
+
+    result = _run(tmp_path, _report())
+
+    assert result["llm_calls"] == 1 and len(judge.prompts) == 1
     assert result["eval_result"]["passed"]
     assert set(result["eval_result"]["items"]) == {"groundedness", "neutrality", "bias", "coverage"}
     assert result["eval_result"]["targets"] == []
@@ -192,3 +241,131 @@ def test_neutrality_rule_catches_direct_technology_recommendation():
     item = evaluator.neutrality(markdown)
 
     assert not item["passed"] and "추천" in item["reason"]
+
+
+def test_judge_claims_carry_section_worker_and_tech():
+    claims = evaluator.judge_claims(_report())
+
+    cells = {(c.worker, c.tech) for c in claims}
+    assert ("market", "KIVI") in cells and ("domain", "InfiniGen") in cells
+    assert ("tech_research", "KIVI") in cells
+    assert all(evaluator.TAG_RE.sub("", c.text).strip(" .") for c in claims)
+    assert len(claims) <= evaluator.MAX_JUDGE_CLAIMS
+
+
+def test_judge_prompt_attaches_cell_evidence(tmp_path, fake_judge):
+    judge = fake_judge()
+
+    _run(tmp_path, _report())
+
+    payload = evaluator.json.loads(judge.prompts[0].split("## 검증 대상\n", 1)[1])
+    market_kivi = next(c for c in payload["claims"] if WEB_REFS[0] in c["text"])
+    assert any(WEB_REFS[0] in ev for ev in market_kivi["evidence"])
+    assert not any(WEB_REFS[1] in ev for ev in market_kivi["evidence"])
+
+
+def test_overstated_claim_targets_report_with_feedback(tmp_path, fake_judge):
+    markdown = _report()
+    cid = _claim_id(markdown, "KIVI는 KV cache를 양자화한다")
+    fake_judge(claims={cid: ("overstated", "양자화 비트 수와 실험 모델을 한정해 서술한다")})
+
+    result = _run(tmp_path, markdown)["eval_result"]
+
+    assert not result["passed"] and not result["items"]["groundedness"]["passed"]
+    assert result["items"]["neutrality"]["passed"]
+    assert result["targets"] == ["report"]
+    assert "KIVI는 KV cache를 양자화한다" in result["feedback"]
+    assert "근거보다 강한 주장" in result["feedback"] and "실험 모델을 한정" in result["feedback"]
+
+
+def test_unsupported_claim_targets_source_worker_cell(tmp_path, fake_judge):
+    markdown = _report()
+    cid = _claim_id(markdown, f"시장 근거가 있다 [웹 {WEB_REFS[0]}]")
+    fake_judge(claims={cid: ("unsupported", "시장 규모 수치의 출처를 다시 조사한다")})
+
+    result = _run(tmp_path, markdown)["eval_result"]
+
+    assert not result["items"]["groundedness"]["passed"]
+    assert result["targets"] == ["market:KIVI"]
+    assert "근거 없는 단정" in result["feedback"] and "(→ market:KIVI)" in result["feedback"]
+
+
+def test_unsupported_claim_without_cell_falls_back_to_report(tmp_path, fake_judge):
+    markdown = _report()
+    cid = _claim_id(markdown, "네 관점에서 비교했다")   # SUMMARY · 두 기술 모두 언급 → 셀 없음
+    fake_judge(claims={cid: ("unsupported", "근거를 붙이거나 문장을 삭제한다")})
+
+    result = _run(tmp_path, markdown)["eval_result"]
+
+    assert result["targets"] == ["report"]
+
+
+def test_worker_target_precedes_report_target(tmp_path, fake_judge):
+    markdown = _report().replace(
+        "두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].",
+        "온디바이스 환경에서는 InfiniGen이 더 적합한 기술이다 [논문 p.3].",
+    )
+    cid = _claim_id(markdown, f"온디바이스 조건이 있다 [웹 {WEB_REFS[5]}]")
+    fake_judge(claims={cid: ("unsupported", "도메인 근거를 보강한다")}, violations={"N1": "조건별 병렬 서술로 바꾼다"})
+
+    result = _run(tmp_path, markdown)["eval_result"]
+
+    assert result["targets"] == ["domain:InfiniGen", "report"]
+
+
+def test_contextual_neutrality_violation_missed_by_rule(tmp_path, fake_judge):
+    sentence = "온디바이스 환경에서는 InfiniGen이 더 적합한 기술이다 [논문 p.3]."
+    markdown = _report().replace("두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].", sentence)
+    assert evaluator.neutrality(markdown)["passed"]          # 규칙 금지어에는 걸리지 않는다
+    assert evaluator.neutrality_suspects(markdown) == [sentence]
+    fake_judge(violations={"N1": "메모리·지연 조건별로 두 기술을 병렬 서술한다"})
+
+    result = _run(tmp_path, markdown)["eval_result"]
+
+    assert not result["passed"] and not result["items"]["neutrality"]["passed"]
+    assert result["items"]["groundedness"]["passed"]
+    assert result["targets"] == ["report"]
+    assert "neutrality:" in result["feedback"] and "병렬 서술" in result["feedback"]
+
+
+def test_neutral_comparison_judged_pass(tmp_path, fake_judge):
+    markdown = _report().replace(
+        "두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].",
+        "저자들은 KIVI가 기준선 대비 처리량 면에서 우수하다고 보고한다 [논문 p.3].",
+    )
+    assert evaluator.neutrality(markdown)["passed"] and len(evaluator.neutrality_suspects(markdown)) == 1
+    fake_judge()
+
+    result = _run(tmp_path, markdown)["eval_result"]
+
+    assert result["passed"]
+    assert "중립 문맥" in result["items"]["neutrality"]["reason"]
+
+
+def test_judge_skips_items_that_failed_rules(tmp_path, monkeypatch):
+    markdown = _report().replace(
+        "두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].",
+        "따라서 KIVI를 선택해야 한다 [추론].",
+    ).replace(f"- Example. *자료*. {WEB_REFS[0]}\n", "")
+
+    def no_llm(role):
+        raise AssertionError("규칙 fail 항목에는 LLM 을 호출하지 않는다")
+    monkeypatch.setattr(evaluator, "llm", no_llm)
+
+    result = _run(tmp_path, markdown)
+
+    assert result["llm_calls"] == 0
+    assert result["eval_result"]["targets"] == ["report"]
+    assert not result["eval_result"]["items"]["groundedness"]["passed"]
+    assert not result["eval_result"]["items"]["neutrality"]["passed"]
+
+
+def test_judge_output_requires_feedback_for_problems():
+    with pytest.raises(ValueError):
+        evaluator.EvaluatorJudgeOutput.model_validate(
+            {"claims": [{"id": "C1", "problem": "unsupported", "feedback": ""}], "neutrality": []}
+        )
+    with pytest.raises(ValueError):
+        evaluator.EvaluatorJudgeOutput.model_validate(
+            {"claims": [], "neutrality": [{"id": "N1", "violation": True, "feedback": " "}]}
+        )
