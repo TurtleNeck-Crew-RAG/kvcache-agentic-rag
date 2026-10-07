@@ -101,10 +101,30 @@ class Neutrality(TypedDict):
 # ── 판정 타입 (Judge 노드 → Gate) ────────────────────────
 
 class CellVerdict(TypedDict):
-    """셀 "{worker}:{tech}" 하나의 충분성 판정 — assess(A) 가 쓴다."""
+    """셀 "{worker}:{tech}" 하나의 충분성 판정 — assess(A) 가 쓴다.
+
+    gap — 무엇이 모자란가. 게이트가 rework_request.gap 으로 그대로 넘기고, 워커는 이 값으로 재작업 방식을 고른다
+      규칙 층 (graph/sufficiency.py)
+        failed       워커 실패 (node_status · safe fallback)  → 그 기술 전체 재조사
+        missing      미수집
+        no_evidence  등급 과반이 "근거 없음" / 개요 비어 있음
+        evidence     근거([논문] · [웹]) 건수 부족
+        numbers      실험 수치 없음 (tech_research)
+        limitations  한계 없음 (tech_research)
+        negatives    반대 근거 부족
+        source_bias  출처 수 부족 · 한 출처 편중 (시장 · 이해관계자)
+        counter_example  웹 근거 없음 (도메인 — #76) → 웹 반례 검색만 다시
+      Judge 층 (prompts/sufficiency_judge.md)
+        unsupported  주장을 근거가 받치지 않음
+        off_topic    다른 관점의 근거로 채워짐
+        negatives    반대 근거가 형식적
+        bias         우열 판정 · 추천
+      게이트 (graph/supervisor.py) — CellVerdict 가 아니라 rework_request 에만
+        eval         보고서 품질 평가 fail 로 되돌린 재조사. hint_query = eval_result.feedback
+    """
     rule: Literal["pass", "fail"]                                # 결정론 층
     judge: Literal["sufficient", "insufficient"] | None          # LLM Judge — 규칙 fail 이면 None
-    gap: str                                                     # 무엇이 모자란가 (예: "negatives")
+    gap: str                                                     # 위 목록 — 충분하면 ""
     hint_query: str                                              # 재작업 때 보강 질의
     reason: str
 
