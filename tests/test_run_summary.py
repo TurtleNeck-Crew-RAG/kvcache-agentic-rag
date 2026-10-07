@@ -88,3 +88,13 @@ def test_judge_wording_change_is_not_improvement(_out):
     row = rs.summarize()["rework_effect"][0]
     assert row["effect"] == "변화 없음"
     assert rs._verdict_key("근거 6건 · Judge: 표현 A") == rs._verdict_key("근거 6건 · Judge: 표현 B")
+
+
+def test_web_calls_counted_per_node(_out):
+    _write(_out, "run.json", {"trace_id": "T", "llm_calls": 1})
+    for node, n in (("market", 5), ("market", 0), ("domain", 2), ("stakeholder", 4)):
+        ob.log_web("T", node, "q", n)
+    ob.log_web("OTHER", "market", "q", 1)
+    s = rs.summarize()
+    assert s["web_calls"] == {"market": 2, "domain": 1, "stakeholder": 1} and s["web_empty"] == 1
+    assert "웹 검색 (Tavily) | 4회 — domain 1, market 2, stakeholder 1 (결과 0건 1회)" in rs.to_markdown(s)

@@ -40,3 +40,12 @@ def test_retrieval_entries_prefers_file_then_state(tmp_path, monkeypatch):
     ob.log_retrieval("B", [{"tech": "KIVI", "relevance": "yes"}])
     rows = ob.retrieval_entries(st)
     assert [r["tech"] for r in rows] == ["InfiniGen"]                      # 이 실행 것만, 파일이 정본
+
+
+def test_log_web_by_trace(tmp_path, monkeypatch):
+    monkeypatch.setattr(ob, "OUT", tmp_path)
+    ob.log_web("A", "market", "KIVI 시장 채택", 5)
+    ob.log_web("A", "stakeholder", "KIVI 비판", 0)            # 실패 질의도 남긴다 — 크레딧은 쓰였다
+    ob.log_web("B", "domain", "InfiniGen 반례", 3)
+    rows = ob.read_jsonl(ob.WEB, "A")
+    assert [(r["node"], r["n_results"]) for r in rows] == [("market", 5), ("stakeholder", 0)]
