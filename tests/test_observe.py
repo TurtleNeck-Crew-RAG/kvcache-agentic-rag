@@ -30,3 +30,13 @@ def test_log_retrieval_empty_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(ob, "OUT", tmp_path)
     ob.log_retrieval("A", [])
     assert ob.read_jsonl(ob.RETRIEVAL) == []
+
+
+def test_retrieval_entries_prefers_file_then_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(ob, "OUT", tmp_path)
+    st = {"trace_id": "A", "retrieval_log": [{"tech": "KIVI", "relevance": "no"}]}
+    assert ob.retrieval_entries(st) == st["retrieval_log"]                 # 파일 없음 → State
+    ob.log_retrieval("A", [{"tech": "InfiniGen", "relevance": "yes"}])
+    ob.log_retrieval("B", [{"tech": "KIVI", "relevance": "yes"}])
+    rows = ob.retrieval_entries(st)
+    assert [r["tech"] for r in rows] == ["InfiniGen"]                      # 이 실행 것만, 파일이 정본

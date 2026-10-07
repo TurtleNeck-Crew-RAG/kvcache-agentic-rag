@@ -95,3 +95,14 @@ def read_jsonl(name: str, trace_id: str | None = None) -> list[dict[str, Any]]:
         return []
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     return [r for r in rows if trace_id is None or r.get("trace_id") == trace_id]
+
+
+def retrieval_entries(state: dict) -> list[dict[str, Any]]:
+    """이번 실행(trace_id)의 검색 로그 — 파일이 정본, 파일에 없으면 State(이행 중 키)로 대체.
+
+    보고서 한계점 통계(report_render.limitation_stats)가 이걸 읽으면 retrieval_log 를 State 에서 빼도 된다.
+    """
+    trace_id = state.get("trace_id")
+    rows = read_jsonl(RETRIEVAL, trace_id) if trace_id else []
+    return rows or list(state.get("retrieval_log") or [])
+

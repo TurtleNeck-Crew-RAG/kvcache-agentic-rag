@@ -5,6 +5,13 @@ pytest.importorskip("langchain_chroma")
 pytest.importorskip("FlagEmbedding")
 
 import agents.tech_research as tr  # noqa: E402
+import graph.observe as ob  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_outputs(monkeypatch, tmp_path):
+    """run() 이 검색 로그를 outputs/ 에 쓰지 않게 — 임시 폴더로."""
+    monkeypatch.setattr(ob, "OUT", tmp_path)
 from rag.rag_node import NO_EVIDENCE  # noqa: E402
 
 
@@ -82,3 +89,11 @@ def test_rework_for_other_worker_is_ignored(monkeypatch):
     monkeypatch.setattr(tr, "ask", _fake_ask_factory(seen))
     tr.run({"rework_request": {"worker": "market", "tech": "KIVI", "gap": "negatives", "hint_query": "x"}})
     assert len(seen) == 10                                                # 일반 경로 (5 × 2)
+
+
+def test_retrieval_log_goes_to_file_with_trace_id(monkeypatch):
+    monkeypatch.setattr(tr, "ask", _fake_ask_factory([]))
+    tr.run({"trace_id": "T", "tech_summary": {"KIVI": PREV},
+            "rework_request": {"worker": "tech_research", "tech": "KIVI", "gap": "numbers", "hint_query": "q"}})
+    rows = ob.read_jsonl(ob.RETRIEVAL, "T")
+    assert len(rows) == 1 and rows[0]["tech"] == "KIVI"
