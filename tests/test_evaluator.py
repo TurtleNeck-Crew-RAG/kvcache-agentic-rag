@@ -369,3 +369,32 @@ def test_judge_output_requires_feedback_for_problems():
         evaluator.EvaluatorJudgeOutput.model_validate(
             {"claims": [], "neutrality": [{"id": "N1", "violation": True, "feedback": " "}]}
         )
+
+
+# ── #83: synthesis 중립성 Judge 에서 이전한 시나리오 ─────────────────────
+
+def test_synthesis_recommendation_fails_then_neutral_rewrite_passes(tmp_path, fake_judge):
+    """종합(5장)에 섞인 우열 표현은 보고서 뒤 evaluator 가 잡고, 중립적으로 다시 쓴 보고서는 통과한다."""
+    original = "두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3]."
+    biased = _report().replace(original, "시장 관점에서 KIVI가 더 우수하다 [추론].")
+    fake_judge()
+
+    first = _run(tmp_path, biased)
+
+    assert not first["eval_result"]["items"]["neutrality"]["passed"]
+    assert first["eval_result"]["targets"] == ["report"]
+    assert "neutrality:" in first["eval_result"]["feedback"]
+
+    rewritten = _run(tmp_path, _report())
+
+    assert rewritten["eval_result"]["passed"] and rewritten["llm_calls"] == 1
+
+
+def test_trl_parallel_statement_is_not_a_neutrality_suspect():
+    markdown = _report().replace(
+        "두 기술은 서로 다른 자원 축을 포기한다 [논문 p.3].",
+        "KIVI는 TRL 4, InfiniGen은 TRL 3으로 추정된다 [추론]. 두 기술의 실험 조건이 다르다 [논문 p.3].",
+    )
+
+    assert evaluator.neutrality(markdown)["passed"]
+    assert evaluator.neutrality_suspects(markdown) == []
