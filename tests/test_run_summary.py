@@ -62,24 +62,24 @@ def test_main_writes_markdown(_out):
 def test_rework_effect_tracks_verdict_per_round(_out):
     _write(_out, "run.json", {"trace_id": "T", "retry": {}})
     _write(_out, "sufficiency.json", {
-        "market:InfiniGen": {"rule": "fail", "judge": None, "reason": "출처 편중 github.com 70% — 과반"},
+        "market:InfiniGen": {"rule": "fail", "judge": None, "gap": "source_bias", "reason": "출처 편중 github.com 70% — 과반"},
         "domain:KIVI": {"rule": "pass", "judge": "sufficient", "reason": "ok"},
         "stakeholder:KIVI": {"rule": "fail", "judge": None, "reason": "반대 근거 1건 < 2"}})
-    _decide(1, "market", "부족 셀 market:InfiniGen 재작업 1/2 — 출처 편중 github.com 88% — 과반")
-    _decide(2, "market", "부족 셀 market:InfiniGen 재작업 2/2 — 출처 편중 github.com 75% — 과반")
+    _decide(1, "market", "부족 셀 market:InfiniGen 재작업 1/2 — gap=source_bias · 출처 편중 github.com 88% — 과반")
+    _decide(2, "market", "부족 셀 market:InfiniGen 재작업 2/2 — gap=source_bias · 출처 편중 github.com 75% — 과반")
     _decide(3, "domain", "부족 셀 domain:KIVI 재작업 1/2 — 웹 근거 0건 < 1 (웹 반례 필요)")
     _decide(4, "stakeholder", "부족 셀 stakeholder:KIVI 재작업 1/2 — 반대 근거 1건 < 2")
     _decide(5, "stakeholder", "부족 셀 stakeholder:KIVI 재작업 2/2 — 반대 근거 1건 < 2")
     rows = {r["cell"]: r for r in rs.summarize()["rework_effect"]}
     assert rows["domain:KIVI"]["effect"] == "해소" and rows["domain:KIVI"]["states"][-1] == "충분"
-    assert rows["market:InfiniGen"]["effect"] == "개선"                 # 88 → 75 → 70
+    assert rows["market:InfiniGen"]["effect"] == "변화 없음"            # 88 → 75 → 70 — 같은 사유(출처 편중)로 여전히 부족
     assert rows["stakeholder:KIVI"]["effect"] == "변화 없음"            # 2회째가 판정을 못 바꿈
     md = rs.to_markdown(rs.summarize())
-    assert "재작업 회차별 판정 변화" in md and "2회째 재작업이 판정을 바꾼 셀: **1/2**" in md
+    assert "재작업 회차별 판정 변화" in md and "해소된 셀: 0/2**" in md
 
 
 def test_judge_wording_change_is_not_improvement(_out):
-    # 같은 문제(Judge off_topic)로 다시 부족한데 LLM 문장만 바뀐 경우 — "개선" 이 아니라 "변화 없음"
+    # 같은 문제(Judge off_topic)로 다시 부족한데 LLM 문장만 바뀐 경우 — "변화 없음"
     _write(_out, "run.json", {"trace_id": "T"})
     _write(_out, "sufficiency.json", {"market:KIVI": {
         "rule": "pass", "judge": "insufficient", "gap": "off_topic", "reason": "근거 6건 · Judge: 시장 근거가 여전히 기술 수치 위주"}})
@@ -104,3 +104,14 @@ def test_tokens_and_budgets_shown(_out):
     _write(_out, "run.json", {"trace_id": "T", "llm_calls": 120, "tokens": 345678})
     md = rs.to_markdown(rs.summarize())
     assert "| 토큰 | 345678 / TOKEN_BUDGET" in md and "LLM_BUDGET" in md
+
+
+def test_gap_change_is_not_improvement(_out):
+    # 첫 실제 실행의 market:InfiniGen — source_bias 를 고치자 negatives 로 다시 부족 → "다른 사유로 부족", 해소 아님 (#115)
+    _write(_out, "run.json", {"trace_id": "T"})
+    _write(_out, "sufficiency.json", {"market:InfiniGen": {"rule": "fail", "judge": None, "gap": "negatives", "reason": "반대 근거 1건 < 2"}})
+    _decide(1, "market", "부족 셀 market:InfiniGen 재작업 1/2 — gap=source_bias · 출처 편중 huggingface.co 57% — 과반")
+    _decide(2, "market", "부족 셀 market:InfiniGen 재작업 2/2 — gap=source_bias · 출처 편중 dl.acm.org 57% — 과반")
+    row = rs.summarize()["rework_effect"][0]
+    assert row["effect"] == "다른 사유로 부족"
+    assert "해소된 셀: 0/1** (다른 사유로 부족 1 · 변화 없음 0)" in rs.to_markdown(rs.summarize())

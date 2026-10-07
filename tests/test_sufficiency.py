@@ -12,7 +12,7 @@ def ev(ref, n=1, tag="웹"):
 
 
 def eval_(evidence, negatives=2, grade="중"):
-    return {"grade": grade, "rationale": "r", "positives": ["p"], "negatives": ["n"] * negatives,
+    return {"grade": grade, "rationale": "r", "positives": ["p"], "negatives": [f"n{i}" for i in range(negatives)],
             "evidence": evidence, "confidence": 0.5}
 
 
@@ -150,3 +150,20 @@ def test_failure_marker_in_negatives_is_not_counted():
     payload = {**GOOD, "negatives": ["진짜 반대 1", "반대 근거 확보 실패 [추론]"]}
     v = su.rule_check("stakeholder", "KIVI", payload, {})
     assert v["gap"] == "negatives" and "1건" in v["reason"]
+
+
+def test_domain_negatives_with_web_source_and_inference_tag_count():
+    # 첫 실제 실행 domain:KIVI — "… [웹 URL][추론]" 2건이 0건으로 처리돼 재작업 2회 낭비 (#115)
+    negs = ["메모리 제약이 엄격하다[https://www.samsungsds.com/kr/x][추론]",          # 실제 도메인 워커 형식
+            "HBM 미지원으로 손실이 크다 [웹 https://v.daum.net/y][추론]"]
+    payload = {**eval_(ev("2402.02750", 3, tag="논문") + ev("https://a.com", 1)), "negatives": negs}
+    assert su.rule_check("domain", "KIVI", payload, {})["rule"] == "pass"
+
+
+def test_inference_only_and_duplicate_negatives_not_counted():
+    assert su._counts_as_negative("표준화 정보가 부족하다. [추론]") is False          # 추론 단독
+    assert su._counts_as_negative("반대 근거 확보 실패 [추론]") is False
+    assert su._counts_as_negative("정확도 하락 [논문 p.9]") is True
+    assert su._counts_as_negative("플래시 대역폭 한계") is True                       # 태그 없음 — 질은 Judge
+    dup = {**GOOD, "negatives": ["같은 문장 [웹 https://a.com]", "같은 문장 [웹 https://a.com]"]}
+    assert su.rule_check("stakeholder", "KIVI", dup, {})["gap"] == "negatives"       # 중복은 1건
