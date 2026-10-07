@@ -19,27 +19,40 @@ class MarketResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
-def queries(tech: str, hint_query: str = "") -> list[str]:
-    base = [
-        f'"{tech}" KV cache official adoption framework integration release',
-        f'"{tech}" KV cache on-device LLM market memory demand',
-        f'"{tech}" KV cache open source implementation roadmap follow-up research',
-    ]
+def queries(tech: str, hint_query: str = "", gap: str = "") -> list[str]:
+    if gap in {"source_bias", "source_diversity", "off_topic"}:
+        base = [
+            f'"{tech}" KV cache company deployment production engineering blog',
+            f'"{tech}" KV cache industry adoption vendor integration news',
+            f'"{tech}" KV cache developer community implementation GitHub issues',
+        ]
+    elif gap == "negatives":
+        base = [
+            f'"{tech}" KV cache adoption barrier deployment limitation',
+            f'"{tech}" KV cache developer issue compatibility overhead',
+            f'"{tech}" KV cache independent criticism production risk',
+        ]
+    else:
+        base = [
+            f'"{tech}" KV cache official adoption framework integration release',
+            f'"{tech}" KV cache on-device LLM market memory demand',
+            f'"{tech}" KV cache open source implementation roadmap follow-up research',
+        ]
     if hint_query.strip():
         return [f'"{tech}" KV cache {hint_query.strip()}', *base]
     return base
 
 
-def _targets(state: GraphState) -> tuple[tuple[str, ...], str]:
+def _targets(state: GraphState) -> tuple[tuple[str, ...], dict | None]:
     """시장 재작업이면 요청된 기술만, 아니면 초기 실행처럼 두 기술을 처리한다."""
     request = state.get("rework_request")
     if not request or request.get("worker") != "market":
-        return web.TECHS, ""
+        return web.TECHS, None
 
     tech = request.get("tech")
     if tech not in web.TECHS:
         raise ValueError(f"unknown market rework technology: {tech!r}")
-    return (tech,), request.get("hint_query", "")
+    return (tech,), request
 
 
 def _evaluate(response: MarketResponse, sources: dict) -> tuple[dict, list]:
@@ -65,13 +78,17 @@ def _evaluate(response: MarketResponse, sources: dict) -> tuple[dict, list]:
 
 def run(state: GraphState) -> dict:
     out, citations, calls = {}, [], 0
-    targets, hint_query = _targets(state)
+    targets, request = _targets(state)
+    hint_query = request.get("hint_query", "") if request else ""
+    gap = request.get("gap", "") if request else ""
     for tech in targets:
         summary = state.get("tech_summary", {}).get(tech)
         if not summary:
             out[tech] = web.blank("기술 조사 입력 없음 — fixtures는 테스트에서 명시적으로 주입")
             continue
-        sources, notes = web.search(queries(tech, hint_query), node="market", trace_id=state.get("trace_id", ""))
+        sources, notes = web.search(
+            queries(tech, hint_query, gap), node="market", trace_id=state.get("trace_id", ""),
+        )
         if not sources:
             out[tech] = web.blank("시장 웹 근거 없음")
         else:

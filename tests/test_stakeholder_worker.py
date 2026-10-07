@@ -103,6 +103,18 @@ def test_non_negative_gap_uses_balanced_mode_with_hint(monkeypatch):
     assert json.loads(prompts[-1][1][1])["mode"] == "balanced"
 
 
+def test_source_bias_rework_uses_nonacademic_stakeholder_queries(monkeypatch):
+    queries, _ = install(monkeypatch, response)
+    current = ready_state()
+    rework(current, "KIVI", 1, gap="source_bias", hint="독립 출처")
+
+    stakeholder.run(current)
+
+    assert len(queries) == 6
+    assert any("developer community" in q["query"] for q in queries)
+    assert all(q["exclude_domains"] == list(web.ACADEMIC_DOMAINS) for q in queries)
+
+
 def test_rework_request_for_another_worker_is_ignored(monkeypatch):
     queries, prompts = install(monkeypatch, response)
     current = ready_state()
@@ -136,6 +148,21 @@ def test_duplicate_quotes_and_inferences_cannot_satisfy_negative_quota(monkeypat
         real = [n for n in evaluation["negatives"] if n != stakeholder.FAILURE]
         assert len(real) == 1
         assert (stakeholder.FAILURE in evaluation["negatives"]) == (attempt == 2)
+
+
+def test_same_negative_sentence_from_different_urls_counts_once():
+    previous = {
+        "grade": "경쟁 기술 진영: 비판", "rationale": "이전", "positives": [],
+        "negatives": ["배포 장벽이 있다 (원문: barrier A) [웹 https://a.example/x]"],
+        "evidence": [], "confidence": 0.5,
+    }
+    fresh = {
+        "grade": "경쟁 기술 진영: 비판", "rationale": "신규", "positives": [],
+        "negatives": ["배포 장벽이 있다 (원문: barrier B) [웹 https://b.example/y]"],
+        "evidence": [], "confidence": 0.5,
+    }
+
+    assert len(stakeholder._merge(previous, fresh)["negatives"]) == 1
 
 
 @pytest.mark.parametrize("failure", ["empty", "exception", "parse"])
