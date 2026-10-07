@@ -71,7 +71,7 @@ def run(state: GraphState) -> dict:
         if not summary:
             out[tech] = web.blank("기술 조사 입력 없음 — fixtures는 테스트에서 명시적으로 주입")
             continue
-        sources, notes = web.search(queries(tech, hint_query))
+        sources, notes = web.search(queries(tech, hint_query), node="market", trace_id=state.get("trace_id", ""))
         if not sources:
             out[tech] = web.blank("시장 웹 근거 없음")
         else:

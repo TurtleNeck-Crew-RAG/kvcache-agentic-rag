@@ -142,8 +142,9 @@ def _finish(result: dict, exhausted: bool) -> None:
 
 
 def _attempt(tech: str, summary: dict, *, negative_only: bool, hint_query: str,
-             attempt: int, previous: dict) -> tuple[dict, list, int]:
-    sources, notes = web.search(queries(tech, negative_only=negative_only, hint_query=hint_query))
+             attempt: int, previous: dict, trace_id: str = "") -> tuple[dict, list, int]:
+    sources, notes = web.search(queries(tech, negative_only=negative_only, hint_query=hint_query),
+                                node="stakeholder", trace_id=trace_id)
     calls, refs = 0, []
     if not sources:
         result = web.blank("이해관계자 웹 근거 없음")
@@ -182,6 +183,7 @@ def run(state: GraphState) -> dict:
                 hint_query=hint_query,
                 attempt=attempt,
                 previous=previous,
+                trace_id=state.get("trace_id", ""),
             )
             calls += attempted
             citations.extend(refs)
