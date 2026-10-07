@@ -1,6 +1,6 @@
-"""보고서 생성 에이전트 — 설계서 6장 목차 (SUMMARY ½p → 1~6장 → REFERENCE).  [소유: D 황재원]
+"""보고서 생성 에이전트 — 설계서 6장 목차 (SUMMARY ½p → 1~6장 → REFERENCE).  [소유: B 심준용]
 
-출력 키: report_md · llm_calls (+ outputs/report/report.md → PDF)
+출력 키: report_uri · llm_calls (본문: outputs/report/report.md → PDF)
 
 LLM 이 쓰는 장: 1 배경 · 3 개요 · 5 시사점 · SUMMARY(맨 마지막 — 본문 전체를 입력으로). 4회 호출.
 State 만으로 만드는 장: 2 선정 · 4 관점별 평가 · 6 한계점 · REFERENCE → agents/report_render.py
@@ -32,6 +32,7 @@ from graph.state import GraphState
 
 TITLE = "KV cache 최적화 기술 다관점 평가 — KIVI(SW) · InfiniGen(HW) · 스마트폰 온디바이스 LLM"
 OUT_DIR = Path("outputs/report")
+MAX_PAGES = 10
 EVAL_PATHS = (Path("outputs/eval.json"),                  # A 의 rag.evaluate 출력 (#27) → 6장 5번
               Path("experiments/sparse_compare/eval.json"))  # 리포에 커밋된 실측 사본 (outputs/ 는 git 제외)
 METRICS_PATH = Path("outputs/retrieval_metrics.json")     # 수동으로 넣을 때의 대체 경로 {"hit@4","mrr@4","ragas"}
@@ -100,7 +101,13 @@ def _pick(state: GraphState, *keys: str) -> dict[str, Any]:
     return {k: state.get(k) for k in keys if state.get(k) is not None}
 
 
-def _write_chapter(common: str, instruction: str, payload: dict[str, Any]) -> str:
+def _write_chapter(common: str, instruction: str, payload: dict[str, Any], feedback: str = "") -> str:
+    if feedback:
+        instruction += (
+            "\n\n## 이전 보고서 평가 피드백\n"
+            "이 장과 관련된 지적만 반영하고, 입력에 없는 사실은 추가하지 않는다.\n"
+            + feedback
+        )
     msgs = [
         ("system", common),
         ("human", instruction + "\n\n## 입력 (JSON)\n```json\n" + json.dumps(payload, ensure_ascii=False, indent=1) + "\n```"),
@@ -111,6 +118,7 @@ def _write_chapter(common: str, instruction: str, payload: dict[str, Any]) -> st
 def build_report(state: GraphState) -> tuple[str, int]:
     """report_md 와 LLM 호출 수를 돌려준다. 파일 저장은 하지 않는다."""
     common, instr = _split_prompt(load_prompt("report"))
+    feedback = str((state.get("eval_result") or {}).get("feedback") or "").strip()
     calls = 0
     ch: dict[str, str] = {}
 
@@ -121,9 +129,9 @@ def build_report(state: GraphState) -> tuple[str, int]:
     ch["limitations"] = render_limitations(state, limitation_stats(state), metrics)
 
     # LLM 이 쓰는 장 — 배경 · 개요 · 시사점
-    ch["background"] = _write_chapter(common, instr["background"], _pick(state, "domain"))
+    ch["background"] = _write_chapter(common, instr["background"], _pick(state, "domain"), feedback)
     calls += 1
-    ch["overview"] = _write_chapter(common, instr["overview"], _pick(state, "tech_summary"))
+    ch["overview"] = _write_chapter(common, instr["overview"], _pick(state, "tech_summary"), feedback)
     calls += 1
     if is_failed(state.get("synthesis")):     # 종합이 실패 기록이면 LLM 이 "실패" 를 엇갈림 주제로 쓴다 (실측 3회차) → 고정 문장
         reason = next((c for c in (state["synthesis"].get("conflicts") or []) if "실패" in c), "종합 워커 실패")
@@ -132,7 +140,9 @@ def build_report(state: GraphState) -> tuple[str, int]:
             f"사유: {reason}. 관점별 원자료는 4장에 그대로 있다. 시사점은 종합 워커 복구 후 다시 생성해야 한다."
         )
     else:
-        ch["implications"] = _write_chapter(common, instr["implications"], _pick(state, "synthesis", "trl_estimate"))
+        ch["implications"] = _write_chapter(
+            common, instr["implications"], _pick(state, "synthesis", "trl_estimate"), feedback,
+        )
         calls += 1
 
     # REFERENCE — 본문(1~6장)에 인용된 것만
@@ -144,43 +154,81 @@ def build_report(state: GraphState) -> tuple[str, int]:
     ch["reference"] = render_reference(cites, body, corpus_ids)
 
     # SUMMARY — 맨 마지막, 본문 전체를 입력으로
-    ch["summary"] = _write_chapter(common, instr["summary"], {"report_body": assemble(TITLE, {k: v for k, v in ch.items() if k != "summary"})})
+    ch["summary"] = _write_chapter(
+        common, instr["summary"],
+        {"report_body": assemble(TITLE, {k: v for k, v in ch.items() if k != "summary"})},
+        feedback,
+    )
     calls += 1
 
     return assemble(TITLE, ch), calls
 
 
-def save(report_md: str, out_dir: Path = OUT_DIR) -> Path:
+def _markdown_html(md_path: Path) -> str:
+    import markdown
+
+    body = markdown.markdown(md_path.read_text(encoding="utf-8"), extensions=["tables", "fenced_code"])
+    css = "body{font-family:'Apple SD Gothic Neo','Noto Sans KR',sans-serif;font-size:10.5pt;line-height:1.5;margin:2cm} h1{font-size:18pt} h2{font-size:14pt;margin-top:1.4em;border-bottom:1px solid #999} code{font-size:9pt}"
+    return f"<html><head><meta charset='utf-8'><style>{css}</style></head><body>{body}</body></html>"
+
+
+def _to_pdf_with_pages(md_path: Path) -> tuple[Path | None, int | None]:
+    """PDF와 실제 페이지 수를 반환한다. 선택 의존성이 없으면 둘 다 None."""
+    try:
+        from weasyprint import HTML
+    except Exception:
+        return None, None
+    document = HTML(string=_markdown_html(md_path)).render()
+    pdf_name = os.environ.get("REPORT_PDF_NAME", "report.pdf")
+    pdf = md_path.with_name(pdf_name)
+    document.write_pdf(pdf)
+    return pdf, len(document.pages)
+
+
+def save_with_pages(report_md: str, out_dir: Path = OUT_DIR) -> tuple[Path, int | None]:
     out_dir.mkdir(parents=True, exist_ok=True)
     md = out_dir / "report.md"
     md.write_text(report_md, encoding="utf-8")
-    pdf = to_pdf(md)
+    pdf, pages = _to_pdf_with_pages(md)
     if pdf:
-        print(f"report: {md} → {pdf}")
+        print(f"report: {md} → {pdf} ({pages}p)")
     else:
         print(f"report: {md} (PDF 는 weasyprint 미설치 — VS Code Markdown PDF 로 수동 변환)")
+    return md, pages
+
+
+def save(report_md: str, out_dir: Path = OUT_DIR) -> Path:
+    md, _ = save_with_pages(report_md, out_dir)
     return md
 
 
 def to_pdf(md_path: Path) -> Path | None:
     """markdown → HTML → PDF (weasyprint). 시스템 pango 가 없으면 None 을 돌려주고 md 만 남긴다."""
-    try:
-        import markdown
-        from weasyprint import HTML
-    except Exception:
-        return None
-    html = markdown.markdown(md_path.read_text(encoding="utf-8"), extensions=["tables", "fenced_code"])
-    css = "body{font-family:'Apple SD Gothic Neo','Noto Sans KR',sans-serif;font-size:10.5pt;line-height:1.5;margin:2cm} h1{font-size:18pt} h2{font-size:14pt;margin-top:1.4em;border-bottom:1px solid #999} code{font-size:9pt}"
-    pdf_name = os.environ.get("REPORT_PDF_NAME", "report.pdf")
-    pdf = md_path.with_name(pdf_name)
-    HTML(string=f"<html><head><meta charset='utf-8'><style>{css}</style></head><body>{html}</body></html>").write_pdf(pdf)
+    pdf, _ = _to_pdf_with_pages(md_path)
     return pdf
+
+
+def _compact_evaluation(report_md: str, state: GraphState) -> str:
+    """페이지 초과 시 다른 장은 보존하고 4장만 압축 렌더링한다."""
+    start_mark = "## 4. 관점별 평가"
+    end_mark = "## 5. 시사점"
+    start = report_md.find(start_mark)
+    end = report_md.find(end_mark)
+    if start < 0 or end < 0 or end <= start:
+        return report_md
+    compact = start_mark + "\n\n" + render_evaluation(state, compact=True) + "\n\n"
+    return report_md[:start] + compact + report_md[end:]
 
 
 def run(state: GraphState) -> dict:
     report_md, calls = build_report(state)
-    save(report_md)
-    return {"report_md": report_md, "llm_calls": calls}
+    md, pages = save_with_pages(report_md)
+    if pages is not None and pages > MAX_PAGES:
+        report_md = _compact_evaluation(report_md, state)
+        md, pages = save_with_pages(report_md)
+        if pages is not None and pages > MAX_PAGES:
+            print(f"[report] 4장 압축 후에도 {pages}p — {MAX_PAGES}p 제한 초과", file=sys.stderr)
+    return {"report_uri": md.as_posix(), "llm_calls": calls}
 
 
 if __name__ == "__main__":
@@ -203,4 +251,4 @@ if __name__ == "__main__":
     s.update(_load("evals.json"))
     s.update(_load("synthesis.json"))
     out = run(s)
-    print(f"llm_calls={out['llm_calls']}  chars={len(out['report_md'])}")
+    print(f"llm_calls={out['llm_calls']}  report_uri={out['report_uri']}")

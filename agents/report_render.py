@@ -1,4 +1,4 @@
-"""보고서 렌더러 — LLM 없이 State 만으로 만드는 장(章)들.  [소유: D 황재원]
+"""보고서 렌더러 — LLM 없이 State 만으로 만드는 장(章)들.  [소유: B 심준용]
 
 설계서 6장. LLM 을 쓰지 않는 부분을 여기 모아 테스트 가능하게 둔다:
   2 기술 선정(selection.yaml) · 4 관점별 평가(*_eval) · 6 한계점(수치 계산) · REFERENCE(인용된 citations 만)
@@ -202,11 +202,19 @@ def _bullets(items: list[str], indent: str = "    ") -> list[str]:
     return [f"{indent}- {x}" for x in items] if items else [f"{indent}- 근거 없음"]
 
 
-def _eval_block(tech: str, e: dict[str, Any]) -> list[str]:
+def _eval_block(tech: str, e: dict[str, Any], *, compact: bool = False) -> list[str]:
     """중첩 목록은 4칸 들여쓰기 — python-markdown(PDF 변환)은 2칸 들여쓰기를 목록으로 보지 않아 한 문단으로 뭉쳤다(7회차 PDF 6쪽)."""
     out = [f"- **{tech}** — 등급: {e.get('grade', '근거 없음')}"]
     if e.get("verdict"):
         out.append(f"    - 판정: {e['verdict']}")
+    if compact:
+        positives = e.get("positives", [])[:2]
+        negatives = [n for n in e.get("negatives", []) if "확보 실패" not in n][:2]
+        out.append("    - 긍정: " + (" / ".join(positives) if positives else "근거 없음"))
+        out.append("    - 부정: " + (" / ".join(negatives) if negatives else "근거 없음"))
+        if e.get("axes"):
+            out.append("    - 3축: " + " · ".join(f"{k} — {v}" for k, v in e["axes"].items()))
+        return out
     if e.get("rationale"):
         out.append(f"    - 근거: {e['rationale']}")
     out.append("    - 긍정:")
@@ -220,7 +228,7 @@ def _eval_block(tech: str, e: dict[str, Any]) -> list[str]:
     return out
 
 
-def render_evaluation(state: dict[str, Any]) -> str:
+def render_evaluation(state: dict[str, Any], *, compact: bool = False) -> str:
     out: list[str] = []
     trl = state.get("trl_estimate") or {}
     out.append("### 4.1 기술 성숙도 (TRL — 공개 정보 기반 추정, 기준 시점 명시)")
@@ -243,7 +251,7 @@ def render_evaluation(state: dict[str, Any]) -> str:
         evals = state.get(key) or {}
         for tech in TECHS:
             e = evals.get(tech)
-            out += _eval_block(tech, e) if e else [f"- **{tech}** — 근거 없음"]
+            out += _eval_block(tech, e, compact=compact) if e else [f"- **{tech}** — 근거 없음"]
             out.append("")
     return "\n".join(out).rstrip()
 

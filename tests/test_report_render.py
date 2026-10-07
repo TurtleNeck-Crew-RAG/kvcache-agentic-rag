@@ -118,6 +118,16 @@ def test_evaluation_renders_both_techs_all_perspectives():
     assert "권장" not in md and "더 낫다" not in md
 
 
+def test_compact_evaluation_keeps_structure_and_reduces_length():
+    full = render_evaluation(_full_state())
+    compact = render_evaluation(_full_state(), compact=True)
+    assert len(compact) < len(full)
+    for heading in ("### 4.1", "### 4.2", "### 4.3", "### 4.4"):
+        assert heading in compact
+    assert compact.count("**KIVI**") == 4 and compact.count("**InfiniGen**") == 4
+    assert "판정: 조건부" in compact
+
+
 def test_selection_renders_criteria_and_excluded():
     sel = {
         "sw": {"name": "KIVI", "paper": "P", "venue": "ICML 2024", "arxiv": "2402.02750", "pages": 15, "reason": "r"},
