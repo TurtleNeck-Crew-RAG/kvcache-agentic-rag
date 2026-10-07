@@ -83,3 +83,26 @@ def test_all_workers_fail_still_terminates():
     assert out["next"] == "end_with_warning" and out["step_count"] <= out["max_steps"]
     assert all(n == MAX_REWORK for n in out["retry"].values()) and len(out["retry"]) == 8
     assert "자동 경고" in out["report_md"] and "노드 실패 domain" in out["report_md"]
+
+
+def test_sqlite_checkpoint_resumes_in_new_graph(tmp_path):
+    """app.py --resume — 프로세스가 죽고 새 그래프 인스턴스가 같은 sqlite · thread_id 로 이어 간다 (#91)."""
+    import sqlite3
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    db = tmp_path / "checkpoints.sqlite"
+    cfg = {"configurable": {"thread_id": "t-sqlite"}, "recursion_limit": RECURSION_LIMIT}
+
+    def app(calls):
+        saver = SqliteSaver(sqlite3.connect(db, check_same_thread=False))
+        return build_graph(workers=make_workers(calls), assess=make_assess(), evaluator=make_evaluator(), checkpointer=saver)
+
+    first = []
+    for i, _ in enumerate(app(first).stream(init_state({}, {}, trace_id="t-sqlite"), cfg, stream_mode="updates")):
+        if i == 4:
+            break
+    second = []
+    out = app(second).invoke(None, cfg)                       # 메모리를 공유하지 않는 새 인스턴스
+    assert first == ["tech_research", "market"]
+    assert second == ["stakeholder", "domain", "synthesis", "report"] and out["status"] == "SUCCESS"
