@@ -19,10 +19,13 @@ TECHS = ("KIVI", "InfiniGen")          # 기술별 독립 호출 — for tech in
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # 설계서 3.6
+# 호출 1회 상한 (#102): 지정하지 않으면 OpenAI 클라이언트 기본값(600초)이라 호출 하나가 멈추면 실행 전체가 기록 없이 선다.
+# 실행 전체의 벽시계 상한(app.py RUN_TIMEOUT)은 노드 경계에서만 보므로, 노드 안의 멈춤은 여기서 끊는다.
+CALL_LIMITS = dict(timeout=60, max_retries=2)
 MODELS = {
-    "generator": dict(model="gpt-4.1-mini", temperature=0.2),
-    "judge": dict(model="gpt-4.1-mini", temperature=0),
-    "light": dict(model="gpt-4.1-nano", temperature=0),   # 인용 형식 정리 등 판단 없는 변환만
+    "generator": dict(model="gpt-4.1-mini", temperature=0.2, **CALL_LIMITS),
+    "judge": dict(model="gpt-4.1-mini", temperature=0, **CALL_LIMITS),
+    "light": dict(model="gpt-4.1-nano", temperature=0, **CALL_LIMITS),   # 인용 형식 정리 등 판단 없는 변환만
 }
 
 
