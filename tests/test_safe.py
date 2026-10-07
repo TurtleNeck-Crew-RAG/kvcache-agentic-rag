@@ -1,7 +1,4 @@
-"""graph/safe.py — 워커 예외가 자기 키의 실패 기록으로 바뀌고, 형식이 State 와 맞는지. LLM 불필요."""
-from langgraph.graph import END
-
-from graph.dispatcher import MAX_RETRY, dispatcher
+"""graph/safe.py — 노드 예외가 자기 키의 실패 기록 + node_status · last_error · errors 로 바뀌는지. LLM 불필요."""
 from graph.safe import fallback, safe
 from graph.state import init_state
 
@@ -12,15 +9,31 @@ def _boom(state):
 
 def test_safe_returns_fallback_on_exception(capsys):
     out = safe("stakeholder", _boom)(init_state({}, {}))
-    assert set(out) == {"stakeholder_eval"}
+    assert set(out) == {"stakeholder_eval", "node_status", "last_error", "errors"}
+    assert out["node_status"] == {"stakeholder": "failed"}          # fallback 이 정상 결과처럼 보이지 않게
+    assert out["last_error"]["node"] == "stakeholder" and out["last_error"]["type"] == "NotImplementedError"
+    assert out["errors"] == [out["last_error"]]
     for tech in ("KIVI", "InfiniGen"):
         e = out["stakeholder_eval"][tech]
         assert e["grade"] == "근거 없음" and "NotImplementedError" in e["rationale"] and e["negatives"] == []
     assert "[safe] stakeholder 실패" in capsys.readouterr().err
 
 
-def test_safe_passes_through_normal_output():
-    assert safe("market", lambda s: {"market_eval": {"KIVI": {}}})({}) == {"market_eval": {"KIVI": {}}}
+def test_safe_passes_through_normal_output_and_marks_ok():
+    out = safe("market", lambda s: {"market_eval": {"KIVI": {}}})({})
+    assert out == {"market_eval": {"KIVI": {}}, "node_status": {"market": "ok"}}
+
+
+def test_fallback_during_rework_touches_only_that_tech():
+    """rework_request 가 자기 것이면 그 기술만 실패 기록 — merge_by_tech 라 다른 기술의 정상 결과가 남는다."""
+    s = {"rework_request": {"worker": "market", "tech": "InfiniGen", "gap": "", "hint_query": ""}}
+    out = safe("market", _boom)(s)
+    assert set(out["market_eval"]) == {"InfiniGen"}
+
+
+def test_judge_node_failure_has_no_payload():
+    out = safe("evaluator", _boom)({})
+    assert set(out) == {"node_status", "last_error", "errors"} and out["node_status"] == {"evaluator": "failed"}
 
 
 def test_fallback_keys_match_state_for_every_worker():
@@ -36,23 +49,6 @@ def test_fallback_keys_match_state_for_every_worker():
         assert set(fallback(name, "x")) == expect, name
     assert fallback("domain", "x")["domain_eval"]["KIVI"]["verdict"] == "부적합"
     assert fallback("synthesis", "x")["neutrality"]["result"] == "pass"     # 3' 루프에 걸리지 않는다
-
-
-def test_graph_reaches_end_when_all_workers_fail():
-    """워커가 전부 예외를 내도 Dispatcher 규칙표대로 END 에 닿는다 — stakeholder 재호출은 상한(2)까지만."""
-    s = init_state({}, {})
-    visited = []
-    for _ in range(20):
-        nxt = dispatcher(s)
-        s.update({"retry": nxt["retry"]})
-        visited.append(nxt["next"])
-        if nxt["next"] == [END]:
-            break
-        for name in nxt["next"]:
-            s.update(fallback(name, "boom"))
-    assert visited[-1] == [END]
-    assert visited.count(["stakeholder"]) == MAX_RETRY["stake"]          # 2' 두 번 → 2'' 진행
-    assert s["report_md"].startswith("# 보고서 생성 실패")
 
 
 def test_safe_reason_is_single_short_line():

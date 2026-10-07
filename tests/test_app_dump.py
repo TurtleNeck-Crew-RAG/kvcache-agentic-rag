@@ -11,7 +11,7 @@ def app_module(monkeypatch, tmp_path):
     # app.py 는 graph.build 를 import 하고, graph.build 는 agents.* → rag.* (chromadb · FlagEmbedding …) 를 끌어온다.
     # 이 테스트는 app._dump 만 보므로 graph.build 자체를 스텁으로 막는다 — 워커가 무엇을 import 하든 영향 없음.
     stub = types.ModuleType("graph.build")
-    stub.build_graph = lambda: None
+    stub.build_graph = lambda **kw: None
     monkeypatch.setitem(sys.modules, "graph.build", stub)
     for mod, attr in (("yaml", "safe_load"), ("dotenv", "load_dotenv")):
         try:
@@ -27,12 +27,14 @@ def app_module(monkeypatch, tmp_path):
 
 
 def test_dump_writes_run_json_and_filled_keys_only(app_module, tmp_path):
-    state = {"llm_calls": 7, "retry": {"stake": 1}, "citations": [{"title": "x"}], "synthesis": None, "market_eval": {}}
+    state = {"llm_calls": 7, "retry": {"market:InfiniGen": 1}, "citations": [{"title": "x"}], "synthesis": None,
+             "market_eval": {}, "trace_id": "t-1", "step_count": 3, "node_status": {"market": "failed"}}
     app_module._dump(state, ["start", "tech_research", "market"], "RuntimeError: boom", 3.14)
     run = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
     assert run["ok"] is False and "boom" in run["error"]
     assert run["visited"] == ["start", "tech_research", "market"]
-    assert run["llm_calls"] == 7 and run["retry"] == {"stake": 1}
+    assert run["llm_calls"] == 7 and run["retry"] == {"market:InfiniGen": 1}
+    assert run["trace_id"] == "t-1" and run["step_count"] == 3 and run["node_status"] == {"market": "failed"}
     assert run["keys_filled"] == ["citations"]
     assert (tmp_path / "citations.json").exists()
     assert not (tmp_path / "synthesis.json").exists()          # None 인 키는 파일을 만들지 않는다
@@ -45,7 +47,7 @@ def test_pdf_name_is_exported_before_graph_runs(app_module, monkeypatch):
 
     seen = {}
 
-    def fake_build_graph():
+    def fake_build_graph(**kw):
         seen["env"] = os.environ.get("REPORT_PDF_NAME")
         raise RuntimeError("stop")               # 그래프는 실행하지 않는다
 
@@ -59,3 +61,30 @@ def test_pdf_name_is_exported_before_graph_runs(app_module, monkeypatch):
     except RuntimeError:
         pass
     assert seen["env"] == "RAG-Output_test.pdf"
+
+
+def test_main_runs_stub_graph_to_end_with_trace_id(app_module, monkeypatch, tmp_path):
+    """app.main — stub 그래프로 trace_id 생성 → 체크포인터 → stream → run.json 까지 (LLM 없음)."""
+    from graph.build import (
+        build_graph as real_build,  # noqa: F401 — 스텁 모듈이 아니라 진짜를 다시 가져온다
+    )
+    monkeypatch.delitem(sys.modules, "graph.build", raising=False)
+    import importlib
+
+    gb = importlib.import_module("graph.build")                # 스텁이 아니라 진짜 graph.build
+    from tests.fixtures.stubs import make_assess, make_evaluator, make_workers
+
+    workers = make_workers()                                     # fixtures 를 읽은 뒤에 Path.read_text 를 막는다
+    monkeypatch.setattr(app_module, "build_graph", lambda **kw: gb.build_graph(
+        workers=workers, assess=make_assess(), evaluator=make_evaluator(fail_times=1), **kw))
+    monkeypatch.setattr(app_module, "_ensure_index", lambda skip: None)
+    monkeypatch.setattr(app_module, "_save_report", lambda state, visited: None)
+    monkeypatch.setattr(app_module.yaml, "safe_load", lambda *_: {})
+    monkeypatch.setattr(app_module.Path, "read_text", lambda *_a, **_k: "")
+    monkeypatch.setattr(app_module, "make_checkpointer", lambda: (__import__("langgraph.checkpoint.memory", fromlist=["x"]).InMemorySaver(), False))
+    assert app_module.main(["--skip-index"]) == 0
+    with open(tmp_path / "run.json", encoding="utf-8") as f:     # Path.read_text 는 위에서 막혀 있다
+        run = json.load(f)
+    assert run["status"] == "SUCCESS" and run["trace_id"] and run["eval_attempts"] == 1
+    assert run["visited"].count("report") == 2 and run["visited"][-1] == "evaluator"
+    assert app_module.main(["--resume", run["trace_id"]]) == 2     # InMemorySaver 로는 프로세스를 넘는 재개 불가 — 명시적으로 거절

@@ -11,7 +11,7 @@ supervisor(state) 는 판정 결과(sufficiency · eval_result) · 시도 횟수
   2. 부족 셀 (재작업 < MAX_REWORK, 예산 안)          → 해당 워커 + rework_request
   3. synthesis 없음                              → synthesis
   4. 보고서 없음                                  → report   (→ evaluator 는 엣지로 고정)
-  5. 평가 pass (또는 평가 노드 미연결)               → END
+  5. 평가 pass (또는 평가 노드 미연결)               → END  — 단 node_status 에 failed 가 남아 있으면 end_with_warning
   6. 평가 fail (eval_attempts < MAX_EVAL, 예산 안)  → targets 중 첫 실행 가능한 곳 — 재조사면 synthesis · 보고서를 비워 다시 흐르게
   7. 평가 fail 소진                              → end_with_warning
 
@@ -96,10 +96,12 @@ def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
         return "report", "종합 완료 · 보고서 없음", {}
 
     ev = state.get("eval_result")
-    if ev is None:                                                            # 5 — evaluator 머지 전
-        return END, "eval_result 없음 — 평가 노드 미연결", {"status": "SUCCESS"}
-    if ev.get("passed"):
-        return END, "보고서 평가 pass", {"status": "SUCCESS"}
+    if ev is None or ev.get("passed"):                                        # 5
+        failed_nodes = sorted(n for n, st in (state.get("node_status") or {}).items() if st == "failed")
+        if failed_nodes:                                                      # safe 의 fallback 을 성공으로 끝내지 않는다
+            return "end_with_warning", f"실패 노드 잔존 {', '.join(failed_nodes)}", {}
+        why = "보고서 평가 pass" if ev else "eval_result 없음 — 평가 노드 미연결"
+        return END, why, {"status": "SUCCESS"}
 
     attempts = state.get("eval_attempts", 0)                                  # 6 · 7
     failed = ", ".join(k for k, it in (ev.get("items") or {}).items() if not it.get("passed"))

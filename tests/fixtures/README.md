@@ -6,6 +6,7 @@
 |---|---|---|
 | `tech_summary.json` | `state["tech_summary"]` 예시 (KIVI · InfiniGen) | B market/stakeholder · C domain 입력 |
 | `evals.json` | `market_eval` · `stakeholder_eval` · `domain_eval` 예시 | C synthesis · D report 입력 |
+| `stubs.py` | 위 JSON 으로 도는 가짜 워커 6개 + `assess` · `evaluator` stub (`CellVerdict` · `EvalResult` 형식) — 그래프 통합 테스트 `tests/test_build.py` | D 그래프 · A/C 판정 출력 형식 대조 |
 | `synthesis.json` | `synthesis` · `trl_estimate` · `neutrality` · `citations` 예시 (미인용 citation 1건 포함 — REFERENCE 제외 테스트용) | D report 입력 · C synthesis 출력 형식 대조 |
 
 ```python
