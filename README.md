@@ -77,10 +77,11 @@
 |---|---|---|
 | 0 | `step_count ≥ max_steps` | `end_with_warning` |
 | 1 | 미수집 셀 (선행 단계 먼저 — 기술 조사가 나머지 워커의 입력) | 해당 워커 |
+| 1' | 수집됐는데 충분성 판정이 없는 셀 (assess 실패) — 판정 없음을 "충분"으로 보지 않는다 | `end_with_warning` |
 | 2 | 부족 셀 (`rule == fail` 또는 `judge == insufficient`), 셀 재작업 < 2, 예산 안 — **라운드 로빈**: 재작업 횟수가 적은 셀부터 | 해당 워커 + `rework_request{worker, tech, gap, hint_query}` |
 | 3 | `synthesis` 없음 | 평가 종합 |
 | 4 | 보고서 없음 | 보고서 생성 → 품질 평가 (엣지 고정) |
-| 5 | 평가 pass | `END` — 단 실패 노드가 남아 있으면 `end_with_warning` |
+| 5 | 평가 pass | `END` — 단 실패 노드가 남아 있으면 `end_with_warning`. 평가 결과가 없으면(evaluator 실패) 성공이 아니라 `end_with_warning` |
 | 6 | 평가 fail, 평가 루프 < 2, 예산 안 | `targets` 의 첫 실행 가능한 곳: `report` / `synthesis` / `{관점}:{기술}` 재조사 (종합 · 보고서를 비워 다시 흐르게) |
 | 7 | 평가 fail 소진 · 예산 초과 | `end_with_warning` |
 

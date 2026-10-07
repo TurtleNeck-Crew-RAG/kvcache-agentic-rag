@@ -8,11 +8,13 @@ supervisor(state) 는 판정 결과(sufficiency · eval_result) · 시도 횟수
   0. step_count ≥ max_steps                       → end_with_warning
   1·2는 선행 조건 단계(STAGES)별로 — tech_summary 가 나머지 워커의 입력이라 기술 조사 셀이 충분/소진돼야 다음 단계로
   1. 미수집 셀                                    → 해당 워커
+     수집됐는데 충분성 판정이 없는 셀 (assess 실패)   → end_with_warning — 판정 없음을 "충분"으로 보지 않는다 (#120)
   2. 부족 셀 (재작업 < MAX_REWORK, 예산 안)          → 해당 워커 + rework_request
      라운드 로빈 — 재작업 횟수가 가장 적은 셀부터. 모든 부족 셀이 1회씩 받은 뒤에야 2회째 (뒤쪽 관점이 예산에 밀려 잘리지 않게)
   3. synthesis 없음                              → synthesis
   4. 보고서 없음                                  → report   (→ evaluator 는 엣지로 고정)
-  5. 평가 pass (또는 평가 노드 미연결)               → END  — 단 node_status 에 failed 가 남아 있으면 end_with_warning
+  5. 평가 pass                                   → END  — 단 node_status 에 failed 가 남아 있으면 end_with_warning
+     보고서는 있는데 eval_result 가 없음(evaluator 실패) → end_with_warning — 평가 없이 성공으로 끝내지 않는다 (#120)
   6. 평가 fail (eval_attempts < MAX_EVAL, 예산 안)  → targets 중 첫 실행 가능한 곳 — 재조사면 synthesis · 보고서를 비워 다시 흐르게
   7. 평가 fail 소진                              → end_with_warning
 
@@ -98,6 +100,9 @@ def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
             missing = [t for t in TECHS if t not in (state.get(PAYLOAD[w]) or {})]
             if missing:
                 return w, f"미수집 셀 {', '.join(f'{w}:{t}' for t in missing)}", {}
+        unjudged = [f"{w}:{t}" for w in stage for t in TECHS if f"{w}:{t}" not in verdicts]
+        if unjudged:                                                          # assess 실패 — 평가 없이 다음 단계로 가지 않는다
+            return "end_with_warning", f"충분성 미판정 셀 {', '.join(unjudged)}", {}
         if not budget_ok:
             continue                                                          # 예산 소진 — 부족 셀은 한계점에 남는다
         candidates = [                                                        # 2 — 라운드 로빈: (재작업 횟수, 워커 순, 기술 순)
@@ -118,12 +123,13 @@ def _decide(state: GraphState) -> tuple[str, str, dict[str, Any]]:
         return "report", "종합 완료 · 보고서 없음", {}
 
     ev = state.get("eval_result")
-    if ev is None or ev.get("passed"):                                        # 5
+    if ev is None:                                                            # 5 — evaluator 실패 · 미실행
+        return "end_with_warning", "품질 평가 결과 없음 — 평가 없이 성공으로 끝내지 않는다", {}
+    if ev.get("passed"):
         failed_nodes = sorted(n for n, st in (state.get("node_status") or {}).items() if st == "failed")
         if failed_nodes:                                                      # safe 의 fallback 을 성공으로 끝내지 않는다
             return "end_with_warning", f"실패 노드 잔존 {', '.join(failed_nodes)}", {}
-        why = "보고서 평가 pass" if ev else "eval_result 없음 — 평가 노드 미연결"
-        return END, why, {"status": "SUCCESS"}
+        return END, "보고서 평가 pass", {"status": "SUCCESS"}
 
     attempts = state.get("eval_attempts", 0)                                  # 6 · 7
     failed = ", ".join(k for k, it in (ev.get("items") or {}).items() if not it.get("passed"))
@@ -170,13 +176,20 @@ def unmet(state: GraphState) -> list[str]:
     if not budget_ok:
         out.append(f"예산 소진 ({budget_why}) — 이후 재작업 · 평가 루프 중단, 마무리 예약분으로 보고서")
     retry = state.get("retry") or {}
-    for cell, v in (state.get("sufficiency") or {}).items():
+    verdicts = state.get("sufficiency") or {}
+    for cell, v in verdicts.items():
         if _insufficient(v):
             out.append(f"근거 부족 셀 {cell} (재작업 {retry.get(cell, 0)}/{MAX_REWORK}) — {v.get('reason') or v.get('gap', '')}")
+    for w in WORKERS:
+        for t in TECHS:
+            if t in (state.get(PAYLOAD[w]) or {}) and f"{w}:{t}" not in verdicts:
+                out.append(f"충분성 미평가 셀 {w}:{t} — 판정 노드(assess) 실패로 근거 충분성을 평가하지 못함")
     for node, st in (state.get("node_status") or {}).items():
         if st == "failed":
             out.append(f"노드 실패 {node}")
     ev = state.get("eval_result")
+    if _has_report(state) and ev is None:
+        out.append("품질 평가 미실행 — 평가 노드(evaluator) 실패로 보고서 품질을 평가하지 못함")
     if ev and not ev.get("passed"):
         for k, it in (ev.get("items") or {}).items():
             if not it.get("passed"):

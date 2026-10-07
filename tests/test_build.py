@@ -53,12 +53,27 @@ def test_failed_worker_is_marked_reworked_and_not_success():
     assert "자동 경고" in out["report_md"] and "노드 실패 market" in out["report_md"]
 
 
-def test_pending_judges_still_reach_end():
-    """A assess · C evaluator 머지 전 — 판정 없이도 END (점심 직후 첫 통합 실행 조건)."""
+def test_assess_failure_stops_before_synthesis():
+    """#120 — assess 가 실패해 판정이 없으면 평가 없이 synthesis · report 로 가지 않고 end_with_warning."""
+    def broken_assess(state):
+        raise RuntimeError("judge down")
+
     calls = []
-    workers = make_workers(calls)
-    out = build_graph(workers=workers).invoke(init_state({}, {}), {"recursion_limit": RECURSION_LIMIT})
-    assert calls[-1] == "report" and out["status"] == "SUCCESS"
+    out, _, _ = _run(calls, assess=broken_assess)
+    assert calls == ["tech_research"]                         # 기술 조사 뒤 바로 멈춤 — synthesis · report 없음
+    assert out["next"] == "end_with_warning" and out["status"] == "INTERRUPTED"
+    assert out["node_status"]["assess"] == "failed"
+
+
+def test_evaluator_failure_is_not_success():
+    """#120 — 보고서는 있는데 eval_result 가 없으면(evaluator 실패) 성공 종료가 아니라 end_with_warning."""
+    def broken_evaluator(state):
+        raise RuntimeError("judge down")
+
+    calls = []
+    out, _, _ = _run(calls, evaluator=broken_evaluator)
+    assert calls[-1] == "report" and out["next"] == "end_with_warning"
+    assert "품질 평가 미실행" in out["report_md"] and "노드 실패 evaluator" in out["report_md"]
 
 
 def test_resume_from_checkpoint_after_crash():
