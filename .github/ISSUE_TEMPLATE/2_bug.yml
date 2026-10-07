@@ -4,16 +4,23 @@ title: "[BUG] "
 labels: ["bug"]
 
 body:
+  - type: markdown
+    attributes:
+      value: |
+        > **Agent 과제(`agent-supervisor`) 작업입니다.** 이슈를 만든 뒤 오른쪽 **Development → Create a branch** 팝업에서
+        > **Change branch source → `agent-supervisor`** 를 고르세요 (기본값 `main` 은 RAG 제출본으로 동결).
+        > PR 도 base 를 `agent-supervisor` 로. 이 경우 머지해도 이슈가 자동으로 닫히지 않으니 직접 Close 하세요.
+
   - type: dropdown
     id: area
     attributes:
       label: 어느 파트
       description: 소유자가 고칩니다. 남의 디렉토리를 직접 고치지 마세요.
       options:
-        - "A RAG·기술조사 (rag/ · agents/tech_research)"
-        - "B 시장·이해관계자 (agents/market · agents/stakeholder)"
-        - "C 도메인·종합 (agents/domain · agents/synthesis)"
-        - "D State·Graph·보고서 (graph/ · agents/report · app.py)"
+        - "A 충분성 판정·관측성·기술조사 (graph/sufficiency · graph/observe · rag/ · agents/tech_research)"
+        - "B 시장·이해관계자·보고서 (agents/market · agents/stakeholder · agents/report)"
+        - "C 품질평가·도메인·종합 (agents/evaluator · agents/domain · agents/synthesis)"
+        - "D Supervisor·State·Graph (graph/supervisor · graph/state · graph/build · graph/safe · app.py)"
         - "공용 (config · scripts · CI)"
         - "모르겠음"
     validations:
