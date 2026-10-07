@@ -27,10 +27,19 @@ def _both(v=None):
     return {t: dict(v or {}) for t in TECHS}
 
 
+OK = {"rule": "pass", "judge": "sufficient", "gap": "", "hint_query": "", "reason": ""}
+
+
+def _all_ok(workers=WORKERS):
+    return {f"{w}:{t}": dict(OK) for w in workers for t in TECHS}
+
+
 def _collected():
+    """8셀 수집 + 전부 충분 판정 — 게이트는 판정 없는 셀을 충분으로 보지 않는다 (#120)."""
     s = init_state({}, {})
     for k in ("tech_summary", "market_eval", "stakeholder_eval", "domain_eval"):
         s[k] = _both({"grade": "중"})
+    s["sufficiency"] = _all_ok()
     return s
 
 
@@ -73,7 +82,7 @@ def test_missing_cell_routes_to_its_worker():
 
 def test_insufficient_cell_rework_with_request_and_retry():
     s = _collected()
-    s["sufficiency"] = {"market:InfiniGen": {"rule": "fail", "judge": None, "gap": "negatives",
+    s["sufficiency"] = {**s["sufficiency"], "market:InfiniGen": {"rule": "fail", "judge": None, "gap": "negatives",
                                              "hint_query": "InfiniGen adoption barrier", "reason": "반대 근거 0건"}}
     out = supervisor(s)
     assert out["next"] == "market"
@@ -84,7 +93,7 @@ def test_insufficient_cell_rework_with_request_and_retry():
 
 def test_judge_insufficient_also_reworks_but_exhausted_goes_on():
     s = _collected()
-    s["sufficiency"] = {"domain:KIVI": {"rule": "pass", "judge": "insufficient", "gap": "", "hint_query": "", "reason": ""}}
+    s["sufficiency"] = {**s["sufficiency"], "domain:KIVI": {"rule": "pass", "judge": "insufficient", "gap": "", "hint_query": "", "reason": ""}}
     assert supervisor(s)["next"] == "domain"
     s["retry"] = {"domain:KIVI": MAX_REWORK}
     assert supervisor(s)["next"] == "synthesis"                   # 소진 → 다음 단계
@@ -93,7 +102,7 @@ def test_judge_insufficient_also_reworks_but_exhausted_goes_on():
 def test_budget_stops_rework_only():
     s = _collected()
     s["tokens"] = TOKEN_BUDGET
-    s["sufficiency"] = {"market:KIVI": {"rule": "fail", "judge": None, "gap": "", "hint_query": "", "reason": ""}}
+    s["sufficiency"] = {**s["sufficiency"], "market:KIVI": {"rule": "fail", "judge": None, "gap": "", "hint_query": "", "reason": ""}}
     assert supervisor(s)["next"] == "synthesis"
 
 
@@ -102,7 +111,7 @@ def test_call_count_no_longer_gates():
     assert not hasattr(sup, "LLM_BUDGET")
     s = _collected()
     s["llm_calls"] = 10_000
-    s["sufficiency"] = {"market:KIVI": {"rule": "fail", "judge": None, "gap": "", "hint_query": "", "reason": ""}}
+    s["sufficiency"] = {**s["sufficiency"], "market:KIVI": {"rule": "fail", "judge": None, "gap": "", "hint_query": "", "reason": ""}}
     assert supervisor(s)["next"] == "market"
 
 
@@ -222,6 +231,7 @@ def test_fixture_states_flow_to_synthesis():
         d = json.loads((FIX / name).read_text(encoding="utf-8"))
         d.pop("_note", None)
         s.update(d if name == "evals.json" else {"tech_summary": d})
+    s["sufficiency"] = _all_ok()                                      # assess 가 전부 충분으로 본 경우
     assert supervisor(s)["next"] == "synthesis"
 
 
@@ -229,7 +239,8 @@ def test_tech_research_rework_precedes_downstream_collection():
     """tech_summary 는 나머지 워커의 입력 — 기술 조사 셀이 부족하면 시장 수집보다 먼저 보강한다."""
     s = init_state({}, {})
     s["tech_summary"] = _both()
-    s["sufficiency"] = {"tech_research:KIVI": {"rule": "fail", "judge": None, "gap": "numbers", "hint_query": "", "reason": ""}}
+    s["sufficiency"] = {**_all_ok(("tech_research",)),
+                        "tech_research:KIVI": {"rule": "fail", "judge": None, "gap": "numbers", "hint_query": "", "reason": ""}}
     assert supervisor(s)["next"] == "tech_research"
     s["retry"] = {"tech_research:KIVI": MAX_REWORK}
     assert supervisor(s)["next"] == "market"
@@ -250,7 +261,7 @@ def test_max_steps_is_derived_from_structure():
 def test_round_robin_gives_every_insufficient_cell_one_rework_first():
     """예전에는 market:KIVI 가 1/2 · 2/2 를 연속으로 가져가 뒤쪽 domain 이 예산에 밀렸다."""
     s = _collected()
-    s["sufficiency"] = {"market:KIVI": _bad(), "domain:InfiniGen": _bad("counter_example", "웹 근거 0건")}
+    s["sufficiency"] = {**s["sufficiency"], "market:KIVI": _bad(), "domain:InfiniGen": _bad("counter_example", "웹 근거 0건")}
     order = []
     for _ in range(4):
         out = supervisor(s)
@@ -262,7 +273,7 @@ def test_round_robin_gives_every_insufficient_cell_one_rework_first():
 
 def test_rework_reason_carries_gap_for_run_summary():
     s = _collected()
-    s["sufficiency"] = {"domain:KIVI": _bad("counter_example", "웹 근거 0건 < 1")}
+    s["sufficiency"] = {**s["sufficiency"], "domain:KIVI": _bad("counter_example", "웹 근거 0건 < 1")}
     reason = sup._decide(s)[1]
     assert reason == "부족 셀 domain:KIVI 재작업 1/2 — gap=counter_example · 웹 근거 0건 < 1"
 
@@ -270,7 +281,7 @@ def test_rework_reason_carries_gap_for_run_summary():
 def test_token_budget_keeps_final_reserve_for_report():
     """마무리 예약분을 못 남기면 재작업 · 평가 루프를 멈추고 보고서로 — 보고서는 끝까지 만든다."""
     s = _collected()
-    s["sufficiency"] = {"market:KIVI": _bad()}
+    s["sufficiency"] = {**s["sufficiency"], "market:KIVI": _bad()}
     s["tokens"] = TOKEN_BUDGET - FINAL_RESERVE                          # 딱 맞으면 아직 허용
     assert supervisor(s)["next"] == "market"
     s["tokens"] = TOKEN_BUDGET - FINAL_RESERVE + 1
@@ -279,3 +290,31 @@ def test_token_budget_keeps_final_reserve_for_report():
     out = supervisor(s)
     assert out["next"] == "end_with_warning"
     assert any("예산 소진" in x and "TOKEN_BUDGET" in x for x in sup.unmet(s))
+
+
+# ── 판정 없음을 충분으로 보지 않는다 (#120) ──
+
+def test_unjudged_cells_end_with_warning_not_synthesis():
+    """#120 재현 — 수집은 됐는데 sufficiency 가 비어 있으면(assess 실패) synthesis 가 아니라 end_with_warning."""
+    s = _collected()
+    s["sufficiency"] = {}
+    s["node_status"] = {"assess": "failed"}
+    out = supervisor(s)
+    assert out["next"] == "end_with_warning"
+    assert "충분성 미판정 셀 tech_research:KIVI" in sup._decide(s)[1]
+    assert any(x.startswith("충분성 미평가 셀 market:KIVI") for x in sup.unmet(s))
+
+
+def test_partially_unjudged_stage_also_stops():
+    s = _collected()
+    s["sufficiency"] = {f"{w}:{t}": {"rule": "pass", "judge": "sufficient", "gap": "", "hint_query": "", "reason": ""}
+                        for w in WORKERS for t in TECHS if f"{w}:{t}" != "domain:InfiniGen"}
+    assert supervisor(s)["next"] == "end_with_warning"
+
+
+def test_missing_eval_result_is_not_success():
+    s = _collected()
+    s.update(synthesis={"matrix": {}}, report_uri="r.md", eval_result=None)
+    out = supervisor(s)
+    assert out["next"] == "end_with_warning" and "status" not in out
+    assert any("품질 평가 미실행" in x for x in sup.unmet(s))

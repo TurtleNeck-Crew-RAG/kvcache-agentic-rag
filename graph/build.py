@@ -12,7 +12,6 @@ START → supervisor ─route()─┬─ tech_research · market · stakeholder 
 """
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
 
 from langgraph.graph import END, START, StateGraph
@@ -38,24 +37,10 @@ def default_workers() -> dict[str, Node]:
     }
 
 
-def _pending(name: str) -> Node:
-    """판정 노드가 아직 머지되지 않았을 때의 자리 — 판정을 쓰지 않는다 (판정 없음 = 재작업 · 평가 루프 없음)."""
-    def node(state: dict) -> dict:
-        print(f"[{name}] 미연결 — 판정 없이 통과", file=sys.stderr)
-        return {}
-    node.__name__ = f"pending_{name}"
-    return node
-
-
 def default_judges() -> tuple[Node, Node]:
-    try:
-        from graph.sufficiency import assess  # A
-    except ImportError:
-        assess = _pending("assess")
-    try:
-        from agents.evaluator import run as evaluator  # C
-    except ImportError:
-        evaluator = _pending("evaluator")
+    # 판정 노드는 필수 — 없으면 import 에서 바로 실패한다. "판정 없이 통과"하는 자리 노드는 두지 않는다 (#120)
+    from agents.evaluator import run as evaluator  # C
+    from graph.sufficiency import assess  # A
     return assess, evaluator
 
 
