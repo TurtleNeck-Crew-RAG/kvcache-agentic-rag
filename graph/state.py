@@ -112,7 +112,8 @@ class CellVerdict(TypedDict):
         numbers      실험 수치 없음 (tech_research)
         limitations  한계 없음 (tech_research)
         negatives    반대 근거 부족
-        source_bias  출처 수 부족 · 한 출처 편중
+        source_bias  출처 수 부족 · 한 출처 편중 (시장 · 이해관계자)
+        counter_example  웹 근거 없음 (도메인 — #76) → 웹 반례 검색만 다시
       Judge 층 (prompts/sufficiency_judge.md)
         unsupported  주장을 근거가 받치지 않음
         off_topic    다른 관점의 근거로 채워짐
