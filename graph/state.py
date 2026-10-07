@@ -205,6 +205,7 @@ class GraphState(TypedDict, total=False):
     retry: Annotated[dict[str, int], merge]      # "market:InfiniGen" → 재작업 횟수
     eval_attempts: int
     llm_calls: Annotated[int, operator.add]
+    tokens: Annotated[int, operator.add]         # LLM 토큰(입력+출력) — graph/safe.py 가 노드마다 집계, 게이트 예산 단위 (#102)
     status: Status
     node_status: Annotated[dict[str, str], merge]           # node → "ok" | "failed"
     errors: Annotated[list[ErrorRecord], operator.add]
@@ -240,6 +241,7 @@ def init_state(domain: dict[str, Any], selected: dict[str, Any], *,
         retry={},
         eval_attempts=0,
         llm_calls=0,
+        tokens=0,
         status="RUNNING",
         node_status={},
         errors=[],

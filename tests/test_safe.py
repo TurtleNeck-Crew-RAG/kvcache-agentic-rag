@@ -58,3 +58,33 @@ def test_safe_reason_is_single_short_line():
     e = safe("domain", boom)({})["domain_eval"]["KIVI"]
     assert "\n" not in e["rationale"] and len(e["rationale"]) < 200
     assert e["rationale"].startswith("워커 실패 — ValueError: 6 validation errors for X")
+
+
+def _fake_llm(total: int):
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import AIMessage
+
+    usage = {"input_tokens": total - 1, "output_tokens": 1, "total_tokens": total}
+    return GenericFakeChatModel(messages=iter([AIMessage(content="x", response_metadata={"model_name": "fake"},
+                                                         usage_metadata=usage)]))
+
+
+def test_safe_counts_tokens_of_llm_calls_inside_node():
+    """#102 — 노드 안 LLM 토큰을 safe 가 집계해 tokens 로 반환 (워커 코드 수정 없음)."""
+    def worker(state):
+        _fake_llm(100).invoke("a")
+        _fake_llm(23).invoke("b")
+        return {"market_eval": {"KIVI": {}}, "llm_calls": 2}
+
+    out = safe("market", worker)({})
+    assert out["tokens"] == 123 and out["llm_calls"] == 2 and out["node_status"] == {"market": "ok"}
+
+
+def test_safe_counts_tokens_spent_before_failure_and_omits_zero():
+    def worker(state):
+        _fake_llm(50).invoke("a")
+        raise RuntimeError("boom")
+
+    out = safe("market", worker)({})
+    assert out["tokens"] == 50 and out["node_status"] == {"market": "failed"}
+    assert "tokens" not in safe("market", lambda s: {"market_eval": {}})({})      # LLM 없으면 키 없음
