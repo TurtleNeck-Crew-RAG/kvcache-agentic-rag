@@ -175,6 +175,39 @@ def test_limitation_stats_and_rendering():
     assert "ResponseRelevancy TBD" in md                      # 없는 수치는 TBD
 
 
+def test_limitations_list_unmet_cells_even_when_evaluation_passes():
+    s = _full_state()
+    s["sufficiency"] = {
+        "market:InfiniGen": {
+            "rule": "fail", "judge": None, "gap": "source_bias", "hint_query": "", "reason": "출처 편중",
+        },
+        "stakeholder:KIVI": {
+            "rule": "pass", "judge": "insufficient", "gap": "negatives", "hint_query": "", "reason": "반대 근거 부족",
+        },
+        "domain:KIVI": {
+            "rule": "pass", "judge": "sufficient", "gap": "", "hint_query": "", "reason": "충분",
+        },
+    }
+    s["retry"] = {"market:InfiniGen": 2, "stakeholder:KIVI": 1}
+    s["eval_result"] = {"passed": True, "items": {}, "targets": [], "feedback": ""}
+
+    st = limitation_stats(s)
+    md = render_limitations(s, st)
+
+    assert st["unmet_cells"] == [
+        "근거 부족 셀 market:InfiniGen (재작업 2/2) — 출처 편중",
+        "근거 부족 셀 stakeholder:KIVI (재작업 1/2) — 반대 근거 부족",
+    ]
+    assert "**근거 충분성 미달 셀**" in md
+    assert all(item in md for item in st["unmet_cells"])
+    assert "domain:KIVI" not in md
+
+
+def test_limitations_say_no_unmet_cells_when_all_are_sufficient():
+    md = render_limitations(_full_state())
+    assert "**근거 충분성 미달 셀**\n- 없음" in md
+
+
 def test_limitation_stats_prefers_retrieval_file_for_trace(tmp_path, monkeypatch):
     import graph.observe as observe
 

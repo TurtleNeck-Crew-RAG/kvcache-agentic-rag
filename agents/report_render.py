@@ -303,6 +303,9 @@ def json_dumps(value: Any) -> str:
 
 
 def limitation_stats(state: dict[str, Any]) -> dict[str, Any]:
+    # 게이트와 같은 판정 문구를 써서 평가 pass 경로에서도 최종 미달 셀을 보고서에 남긴다 (#121).
+    from graph.supervisor import unmet
+
     tagged = _tagged_statements(state)
     stmts = [s for s, _ in tagged]
     inference_only = [s for s, tags in tagged if tags == {"추론"}]
@@ -318,6 +321,7 @@ def limitation_stats(state: dict[str, Any]) -> dict[str, Any]:
         "rewrite_recovered": sum(1 for r in rewritten if r.get("relevance") == "yes"),
         "by_tech_no_evidence": {t: sum(1 for r in log if r.get("tech") == t and r.get("relevance") == "no_evidence") for t in TECHS},
         "neutrality_violations": list((state.get("neutrality") or {}).get("violations") or []),
+        "unmet_cells": [item for item in unmet(state) if item.startswith("근거 부족 셀 ")],
     }
 
 
@@ -337,6 +341,8 @@ def render_limitations(state: dict[str, Any], stats: dict[str, Any] | None = Non
     by_tech = " · ".join(f"{t} {n}건" for t, n in st["by_tech_no_evidence"].items())
     viol = st["neutrality_violations"]
     viol_line = (f" 중립성 검증에서 반려 상한(2회) 후에도 남은 위반 표현 {len(viol)}건: " + "; ".join(viol)) if viol else ""
+    unmet_cells = st.get("unmet_cells") or []
+    unmet_lines = [f"- {item}" for item in unmet_cells] or ["- 없음"]
     return "\n".join([
         "1. **공개 정보 기반 추정의 한계** — TRL 4~6 구간은 수율·성능 수치가 비공개라 정보 공백이 가장 크다. 4.1 의 등급은 공개 코드·재현·프레임워크 통합 여부만으로 추정한 것이다.",
         "2. **TRL 기준 시점** — arXiv v1 과 학회 게재·가이드 표기 시점이 논문마다 다르다(KIVI: v1 2024-02 / ICML 2024-07, InfiniGen: v1 2024-06 / OSDI 2024-07). 기준 시점에 따라 추정이 달라진다 — 발표 시점과 채택 간 시차의 구체 사례다.",
@@ -344,6 +350,9 @@ def render_limitations(state: dict[str, Any], stats: dict[str, Any] | None = Non
         f"4. **`[추론]` 태그 비율** — 판단 문장 {st['tagged_total']}건 중 논문·웹 근거 없이 추론에만 의존한 문장 {ratio}.",
         f"5. **검색·생성 품질** — Hit Rate@4 {hit} · MRR@4 {mrr}{mode} · RAGAS Faithfulness {ragas.get('faithfulness', 'TBD')} · ResponseRelevancy {ragas.get('response_relevancy', 'TBD')} · ContextPrecision {ragas.get('context_precision', 'TBD')}. 검색 {st['retrieval_total']}회 중 \"논문에 근거 없음\" {no_ev}건({by_tech}). 임베딩 비교는 20문항 기준이라 0.10 차이는 2문항이며, 선정은 수치 우위가 아니라 한국어 질의 요건·컨텍스트 길이에 둔다. 근거 없음이 한 기술에 몰리면 그 기술 판정의 `[추론]` 비중이 높아진다. 웹 출처는 Tavily 가 저자·게시일을 주지 않는 경우가 많아 REFERENCE 에 기관명(사이트)과 접근일로 대체했다 — 게시일이 필요한 항목은 사람이 확인해야 한다.",
         f"6. **질의 재작성 효과** — {rewrite}. 효과가 없으면 재작성 단계 제거를 검토한다.",
+        "",
+        "**근거 충분성 미달 셀**",
+        *unmet_lines,
     ])
 
 
