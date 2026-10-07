@@ -1,8 +1,9 @@
 # 협업 규칙 — Agent 과제 (`agent-supervisor` 브랜치)
 
 > 이슈 → 브랜치 → PR → 리뷰 → 머지. 예외 없이 이 순서로 갑니다.
-> **Agent 과제의 기준 브랜치는 `agent-supervisor` 입니다.** PR 의 base 도 `agent-supervisor`.
+> **Agent 과제의 모든 PR 은 무조건 `agent-supervisor` 로 머지합니다.** 예외 없음.
 > `main` 은 RAG 과제 제출본으로 **동결** — 어떤 PR 도 `main` 으로 보내지 않습니다.
+> base 가 `main` 인 PR 은 CI `base-branch` 검사가 **빨간불**로 막습니다 (유일한 예외: 템플릿 반영 #50).
 > 분담 · 계약 · 시간표는 [docs/ROLES.md](docs/ROLES.md).
 
 ---
@@ -173,14 +174,14 @@ git commit -m "docs: README Tech Stack 에 Hit Rate/MRR 기재"
 - 본문의 `closes #3` 을 **반드시** 채우기 — 어떤 이슈의 PR 인지 연결용
 - ⚠️ **base 가 `agent-supervisor` 면 이슈가 자동으로 닫히지 않습니다.** GitHub 은 기본 브랜치(`main`)로 가는 PR 에서만 `closes` 를 해석합니다.
   **머지한 사람이 이슈를 직접 Close** 하세요
-- ⚠️ PR 본문에 자동으로 채워지는 템플릿은 **`main` 의 옛 버전**(RAG 소유 표)입니다. GitHub 은 기본 브랜치의 템플릿만 씁니다.
-  "건드린 디렉토리"는 이 문서 1절 소유 표 기준으로 체크하고, 아래 두 줄을 체크리스트에 직접 확인하세요:
-  워커가 `next` · `retry` · `sufficiency` · `eval_result` 를 반환하지 않음 / Judge 노드가 다음 노드를 정하지 않음
-- 이슈 템플릿은 `main` 에 있는 그대로 씁니다 (`…/issues/new/choose`) — 그대로 동작합니다
+- **base 는 무조건 `agent-supervisor`.** `main` 으로 열었으면 PR 화면 제목 옆 `Edit` → base 드롭다운에서 바꾸면 됩니다 (새로 열 필요 없음).
+  CI `base-branch` 검사가 실패하면 base 가 `main` 이라는 뜻입니다
+- 이슈 · PR 템플릿은 GitHub 이 기본 브랜치(`main`)에서만 읽어서, Agent 과제용 안내를 `main` 에 반영했습니다 (#50 · #51).
+  `agent-supervisor` 의 `.github/` 는 같은 내용의 사본입니다 — 템플릿을 바꿀 땐 두 브랜치를 같이 바꿉니다
 - 리뷰어 **최소 1명** 승인 후 머지
 - 머지 방식: **Squash and merge**
 - 머지 후 원격 브랜치 삭제
-- **스스로 머지하지 않기.** 리뷰가 급하면 슬랙에서 부르기
+- 머지는 **리뷰어 승인 후** 합니다. 작성자가 못 하는 상황이면 승인한 팀원 누구든 머지해도 됩니다. 승인 없이 머지하지 않기 — 리뷰가 급하면 슬랙에서 부르기
 
 ### PR을 잘게 쪼개주세요
 
@@ -216,9 +217,8 @@ PR 을 올리면 `검사` 가 자동으로 돕니다.
 | **트레이스용으로 충분성 기준을 일부러 낮추거나 실패를 연출** | 재현성 항목에서 제출 trace 와 비교된다 |
 | **`main` 으로 PR · push** | `main` 은 RAG 제출본. 아래 ⚠️ 참조 |
 
-> ⚠️ **`main` 보호는 GitHub 이 강제하지 못할 수 있습니다.** 무료 플랜의 private 저장소에는
-> branch protection·ruleset 을 걸 수 없습니다 (public 전환 시 가능).
-> 서로 지키는 것으로 합니다.
+> ⚠️ **`main` 보호**: CI `base-branch` 검사가 base 가 `main` 인 PR 을 빨간불로 표시합니다.
+> 다만 빨간불이어도 머지 버튼 자체가 잠기지는 않으니, **빨간불 PR 은 머지하지 않습니다.**
 
 ---
 

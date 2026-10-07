@@ -1,6 +1,10 @@
 <!-- 제목: [FEAT] 이해관계자 워커 — 찬반 각 2건 강제  (이슈 제목과 맞추기) -->
 
-> **base 브랜치가 `agent-supervisor` 인지 확인하세요.** `main` 은 RAG 제출본으로 동결입니다.
+> [!IMPORTANT]
+> **Agent 과제 PR 은 base 를 `agent-supervisor` 로** 바꾸세요 (화면 위 `base:` 드롭다운 — 기본값이 `main`).
+> `main` 은 RAG 제출본으로 동결입니다.
+> base 가 `agent-supervisor` 면 `closes #N` 으로 이슈가 **자동으로 닫히지 않습니다** → 머지한 사람이 이슈를 직접 Close.
+> 분담 · State 계약: `agent-supervisor` 브랜치의 `docs/ROLES.md` · `CONTRIBUTING.md`
 
 ## 관련 이슈
 - closes #
@@ -63,6 +67,7 @@
 ---
 
 ## 체크리스트
+- [ ] base 가 `agent-supervisor` 입니다. (`main` 아님)
 - [ ] 브랜치 네이밍 규칙을 준수했습니다. (`feat/이슈번호-slug`)
 - [ ] 관련 이슈를 연결했습니다. (`closes #이슈번호`)
 - [ ] 커밋 메시지가 `<type>(<scope>): 요약` 형식입니다.
