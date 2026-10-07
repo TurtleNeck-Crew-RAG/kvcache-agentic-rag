@@ -33,7 +33,8 @@ INDEX_DIR = Path("data/index")
 CHECKPOINT_DB = OUT / "checkpoints.sqlite"
 # 시간 상한은 게이트가 아니라 여기서 (#102) — 게이트가 시계를 읽으면 같은 State 에서 다른 결정이 나온다.
 # 노드 경계에서만 확인하므로 LLM 호출 하나가 멈추는 경우는 호출 단위 timeout(agents/_common.py)이 1차 방어.
-RUN_TIMEOUT = 1200        # 초 — ⚠️ 잠정. RAG 실행 186초 × 재작업 · 평가 루프 여유. 첫 실제 실행 소요 × 1.5 로 확정
+RUN_TIMEOUT = 3600        # 초 — ⚠️ 잠정. RAG 실행이 PC 에 따라 186초 ~ 1556초(병렬 fan-out, 재작업 없음)였고,
+                          # Agent 과제는 매 턴 워커 1명(순차) + 재작업 · 평가 루프라 더 길다. 첫 실제 실행 소요 × 1.5 로 확정 (#102)
 DUMP_KEYS = ("citations", "synthesis", "trl_estimate", "tech_summary", "market_eval", "stakeholder_eval",
              "domain_eval", "sufficiency", "eval_result", "errors",
              "neutrality")                         # 이행 중 키 (graph/state.py)
