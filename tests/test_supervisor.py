@@ -174,6 +174,19 @@ def test_end_with_warning_appends_unmet_to_report_file(tmp_path):
     assert "자동 경고" in text and "market:InfiniGen (재작업 2/2)" in text and "groundedness" in text
 
 
+def test_end_with_warning_goes_before_reference(tmp_path):
+    """#121 — 경고 절은 REFERENCE 뒤(보고서 맨 끝)가 아니라 6장 한계점 뒤 · REFERENCE 앞."""
+    md = tmp_path / "report.md"
+    md.write_text("# 보고서\n\n## 6. 한계점\n\n1. 공개 정보\n\n## REFERENCE\n\n- Liu(2024). KIVI.\n", encoding="utf-8")
+    s = _collected()
+    s.update(report_uri=str(md), eval_result=_fail_eval(["report"]), eval_attempts=MAX_EVAL)
+    end_with_warning(s)
+    text = md.read_text(encoding="utf-8")
+    assert text.index("## 6. 한계점") < text.index("## 자동 경고") < text.index("## REFERENCE")
+    assert text.rstrip().endswith("- Liu(2024). KIVI.")                       # 참고문헌이 마지막
+    assert text.count("## REFERENCE") == 1
+
+
 def test_end_with_warning_without_report_is_interrupted():
     s = init_state({}, {}, max_steps=1)
     s["step_count"] = 1

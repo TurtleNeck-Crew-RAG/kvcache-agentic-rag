@@ -197,9 +197,21 @@ def unmet(state: GraphState) -> list[str]:
     return out
 
 
+REFERENCE_HEADING = "\n## REFERENCE"
+
+
 def _warning_md(items: list[str]) -> str:
     lines = "\n".join(f"- {x}" for x in items) or "- (기록된 미달 항목 없음)"
-    return f"\n\n## 자동 경고 — 상한 소진으로 종료\n\n{lines}\n"
+    return f"## 자동 경고 — 상한 소진으로 종료\n\n{lines}\n\n"
+
+
+def _insert_warning(md: str, items: list[str]) -> str:
+    """경고 절을 REFERENCE 앞(6장 한계점 뒤)에 넣는다 — 참고문헌 뒤에 본문이 오지 않게 (#121). REFERENCE 가 없으면 끝에."""
+    block = _warning_md(items)
+    i = md.find(REFERENCE_HEADING)
+    if i < 0:
+        return md.rstrip("\n") + "\n\n" + block
+    return md[:i].rstrip("\n") + "\n\n" + block + md[i + 1:]
 
 
 def end_with_warning(state: GraphState) -> dict:
@@ -208,8 +220,8 @@ def end_with_warning(state: GraphState) -> dict:
     out: dict[str, Any] = {"status": "SUCCESS" if _has_report(state) else "INTERRUPTED"}
     uri = state.get("report_uri")
     if uri and Path(uri).exists():
-        with open(uri, "a", encoding="utf-8") as f:
-            f.write(_warning_md(items))
-    elif state.get("report_md"):                         # 이행 중 — app.py 가 report_md 를 파일 · PDF 로 저장
-        out["report_md"] = state["report_md"] + _warning_md(items)
+        path = Path(uri)
+        path.write_text(_insert_warning(path.read_text(encoding="utf-8"), items), encoding="utf-8")
+    elif state.get("report_md"):                         # safe fallback 의 report_md — app.py 가 파일 · PDF 로 저장
+        out["report_md"] = _insert_warning(state["report_md"], items)
     return out
