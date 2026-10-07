@@ -26,9 +26,10 @@ MAX_WEB_SOURCE_SHARE = 0.40
 
 TAG_RE = re.compile(r"\[(논문|웹|추론|p\.\d)[^\]]*\]")
 URL_RE = re.compile(r"https?://[^\s\]\)>]+")
-ARXIV_RE = re.compile(r"\b\d{4}\.\d{4,5}\b")
+ARXIV_RE = re.compile(r"\b\d{4}\.\d{4,5}(?=v\d+\b|\b)")   # 2402.02750 · 2402.02750v2 → 2402.02750
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+NON_CLAIM_PREFIXES = ("판단에 필요한 추가 확인 항목",)   # 5장의 확인 필요 목록 — 판단이 아니라 다음 할 일
 TECH_HEADER_RE = re.compile(r"^(?:-\s*)?\*\*(?:KIVI|InfiniGen)\*\*\s*[—:-]")
 DIRECT_RECOMMENDATION_RE = re.compile(
     r"(?:KIVI|InfiniGen).{0,30}(?:선택해야|권장(?:한다|된다)|더\s+낫다|더\s+우수하다)",
@@ -137,11 +138,24 @@ def claim_records(markdown: str) -> list[Claim]:
             continue
         if not plain or plain.endswith(":") or plain.startswith(("confidence:", "판정:", "긍정:", "부정:")):
             continue
-        if "공개 정보 기반 추정이다" in plain:
+        if "공개 정보 기반 추정이다" in plain or plain == "근거 없음":   # 근거 없음 = 없다는 기록 (판단 아님)
             continue
-        parts = [part.strip() for part in SENTENCE_RE.split(line) if len(part.strip()) >= 8]
-        records.extend(Claim(part, worker, tech or _mentioned_tech(part)) for part in parts or [line])
+        records.extend(
+            Claim(part, worker, tech or _mentioned_tech(part))
+            for part in _sentences(line) if not part.startswith(NON_CLAIM_PREFIXES)
+        )
     return records
+
+
+def _sentences(line: str) -> list[str]:
+    """문장 단위로 나눈다. 마침표 뒤에 붙은 출처 태그(`…했다. [웹 URL]`)는 앞 문장에 붙인다."""
+    parts: list[str] = []
+    for part in (p.strip() for p in SENTENCE_RE.split(line)):
+        if parts and part and not TAG_RE.sub("", part).strip(" .,;"):
+            parts[-1] = f"{parts[-1]} {part}"
+        elif part:
+            parts.append(part)
+    return [part for part in parts if len(part) >= 8] or [line]
 
 
 def claim_units(markdown: str) -> list[str]:
@@ -177,14 +191,24 @@ def _clean_urls(text: str) -> set[str]:
     return {url.rstrip(".,;") for url in URL_RE.findall(text)}
 
 
+def _citation_keys(text: str) -> tuple[set[str], set[str]]:
+    """(웹 URL, arXiv id). arxiv.org 의 abs · html · pdf URL 은 REFERENCE 정규화와 같게 arXiv id 로 센다."""
+    urls = set()
+    ids = set(ARXIV_RE.findall(text))
+    for url in _clean_urls(text):
+        if "arxiv.org" in urlparse(url).netloc and ARXIV_RE.search(url):
+            continue   # id 는 위 findall 이 이미 잡았다
+        urls.add(url)
+    return urls, ids
+
+
 def _citation_correspondence(markdown: str) -> tuple[bool, str]:
     body, reference = _split_reference(markdown)
     if not reference.strip():
         return False, "REFERENCE 없음"
 
-    body_urls, reference_urls = _clean_urls(body), _clean_urls(reference)
-    body_ids, reference_ids = set(ARXIV_RE.findall(body)), set(ARXIV_RE.findall(reference))
-    missing = sorted(body_urls - reference_urls) + sorted(body_ids - reference_ids)
+    (body_urls, body_ids), (reference_urls, reference_ids) = _citation_keys(body), _citation_keys(reference)
+    missing = sorted(body_urls - reference_urls) + [f"arXiv:{i}" for i in sorted(body_ids - reference_ids)]
     uncited_urls = sorted(reference_urls - body_urls)
 
     # 페이지형 논문 태그는 보고서 렌더러가 코퍼스 논문 인용으로 취급한다.
@@ -197,7 +221,7 @@ def _citation_correspondence(markdown: str) -> tuple[bool, str]:
     if missing:
         problems.append("REFERENCE 누락: " + ", ".join(missing))
     if uncited_urls or uncited_ids:
-        problems.append("본문 미인용 REFERENCE: " + ", ".join(uncited_urls + uncited_ids))
+        problems.append("본문 미인용 REFERENCE: " + ", ".join(uncited_urls + [f"arXiv:{i}" for i in uncited_ids]))
     return not problems, "; ".join(problems) if problems else "본문 인용과 REFERENCE 대응"
 
 
@@ -223,14 +247,24 @@ def neutrality(markdown: str) -> EvalItem:
 
 
 def _source_key(ref: str) -> str:
+    """웹 근거의 출처 단위 — 도메인. arxiv.org URL 은 논문 id 로 합친다 (graph/sufficiency.source_key 와 같은 규칙)."""
     if not ref.startswith(("http://", "https://")):
         return ""
-    return urlparse(ref).netloc.removeprefix("www.").lower()
+    parsed = urlparse(ref)
+    if "arxiv.org" in parsed.netloc and (match := ARXIV_RE.search(parsed.path)):
+        return f"arXiv:{match.group(0)}"
+    return parsed.netloc.removeprefix("www.").lower()
 
 
 def bias(state: GraphState) -> EvalItem:
+    return _bias(state)[0]
+
+
+def _bias(state: GraphState) -> tuple[EvalItem, list[str]]:
+    """(판정, 재조사 target). 반대 근거가 없는 셀, 편중 출처를 가장 많이 쓴 셀이 target 이다."""
     missing_negatives: list[str] = []
     web_sources: list[str] = []
+    cell_sources: dict[str, Counter] = {}
 
     for tech in ("KIVI", "InfiniGen"):
         tech_summary = (state.get("tech_summary") or {}).get(tech) or {}
@@ -240,10 +274,12 @@ def bias(state: GraphState) -> EvalItem:
             value = (state.get(key) or {}).get(tech) or {}
             if not value.get("negatives"):
                 missing_negatives.append(f"{worker}:{tech}")
-            web_sources.extend(
+            sources = [
                 source for evidence in value.get("evidence") or []
                 if evidence.get("tag") == "웹" and (source := _source_key(str(evidence.get("ref", ""))))
-            )
+            ]
+            web_sources.extend(sources)
+            cell_sources[f"{worker}:{tech}"] = Counter(sources)
 
     counts = Counter(web_sources)
     top_source, top_count = counts.most_common(1)[0] if counts else ("", 0)
@@ -252,14 +288,18 @@ def bias(state: GraphState) -> EvalItem:
     negative_score = 1.0 - len(missing_negatives) / 8
     source_score = 1.0 - top_share if web_sources else 0.0
     details = []
+    targets = list(missing_negatives)
     if missing_negatives:
         details.append("반대 근거 없음: " + ", ".join(missing_negatives))
     if not web_sources:
         details.append("웹 근거 없음")
+        targets.extend(cell for cell in cell_sources if cell not in targets)
     elif top_share > MAX_WEB_SOURCE_SHARE:
         details.append(f"웹 출처 편중 {top_source} {top_share:.0%} > {MAX_WEB_SOURCE_SHARE:.0%}")
+        heavy = sorted((c for c in cell_sources if cell_sources[c][top_source]), key=lambda c: -cell_sources[c][top_source])
+        targets.extend(cell for cell in heavy if cell not in targets)
     reason = "; ".join(details) if details else f"8셀 반대 근거 존재 · 최다 웹 출처 {top_source} {top_share:.0%}"
-    return _item(passed, (negative_score + source_score) / 2, reason)
+    return _item(passed, (negative_score + source_score) / 2, reason), targets if not passed else []
 
 
 def _perspective_section(markdown: str, heading: str) -> str:
@@ -272,6 +312,15 @@ def _perspective_section(markdown: str, heading: str) -> str:
 
 
 def coverage(markdown: str) -> EvalItem:
+    return _coverage(markdown, {})[0]
+
+
+def _cell_payload(state: GraphState, worker: str, tech: str) -> dict:
+    return (state.get(WORKER_KEYS[worker]) or {}).get(tech) or {}
+
+
+def _coverage(markdown: str, state: GraphState) -> tuple[EvalItem, list[str]]:
+    """(판정, target). 관점×기술 누락은 State 에 그 셀 결과가 없으면 워커 재조사, 있으면 보고서 렌더링 문제로 본다."""
     missing = [name for name, pattern in REQUIRED_HEADINGS.items() if not pattern.search(markdown)]
     for heading in PERSPECTIVE_HEADINGS:
         section = _perspective_section(markdown, heading)
@@ -283,22 +332,42 @@ def coverage(markdown: str) -> EvalItem:
         missing.append("reference:item")
     total_checks = len(REQUIRED_HEADINGS) + len(PERSPECTIVE_HEADINGS) * 2 + 1
     score = 1.0 - len(set(missing)) / total_checks
-    return _item(not missing, score, "필수 구성 모두 존재" if not missing else "누락: " + ", ".join(missing))
+    targets: list[str] = []
+    for name in missing:
+        heading, _, tech = name.partition(":")
+        worker = SECTION_WORKERS.get(heading)
+        target = f"{worker}:{tech}" if worker and tech in TECHS and not _cell_payload(state, worker, tech) else "report"
+        if target not in targets:
+            targets.append(target)
+    item = _item(not missing, score, "필수 구성 모두 존재" if not missing else "누락: " + ", ".join(missing))
+    return item, targets
+
+
+def _order_targets(targets: list[str]) -> list[str]:
+    """재조사 target 을 앞에 둔다 — 워커 재실행은 synthesis · report 를 비워 보고서까지 다시 흐른다."""
+    cells = [t for t in dict.fromkeys(targets) if t != "report"]
+    return cells + (["report"] if "report" in targets else [])
 
 
 def evaluate(markdown: str, state: GraphState) -> EvalResult:
     """1층 규칙 평가. LLM 없이 네 항목을 모두 채운다."""
+    bias_item, bias_targets = _bias(state)
+    coverage_item, coverage_targets = _coverage(markdown, state)
     items = {
         "groundedness": groundedness(markdown),
         "neutrality": neutrality(markdown),
-        "bias": bias(state),
-        "coverage": coverage(markdown),
+        "bias": bias_item,
+        "coverage": coverage_item,
     }
     failed = [name for name, item in items.items() if not item["passed"]]
+    # 본문 표현 문제(groundedness · neutrality)는 report, 근거 부족(bias · coverage)은 해당 셀 워커
+    targets = [*bias_targets, *coverage_targets]
+    if not items["groundedness"]["passed"] or not items["neutrality"]["passed"]:
+        targets.append("report")
     return {
         "passed": not failed,
         "items": items,  # type: ignore[typeddict-item]
-        "targets": ["report"] if failed else [],
+        "targets": _order_targets(targets),
         "feedback": "\n".join(f"{name}: {items[name]['reason']}" for name in failed),
     }
 
@@ -464,15 +533,12 @@ def judge(markdown: str, state: GraphState, rule_result: EvalResult) -> tuple[Ev
         else:
             items["neutrality"] = _item(True, 1.0, f"비교·추천 단서 문장 {len(suspects)}건 모두 중립 문맥 (Judge)")
 
-    # 재조사 target 을 앞에 둔다 — 워커 재실행은 synthesis · report 를 비워 보고서까지 다시 흐른다
-    ordered = [t for t in [*targets, *rule_result["targets"]] if t != "report"]
-    if "report" in targets or "report" in rule_result["targets"]:
-        ordered.append("report")
+    ordered = _order_targets([*targets, *rule_result["targets"]])
     feedback = "\n".join(line for line in (rule_result["feedback"], *notes) if line)
     result: EvalResult = {
         "passed": all(item["passed"] for item in items.values()),
         "items": items,  # type: ignore[typeddict-item]
-        "targets": list(dict.fromkeys(ordered)),
+        "targets": ordered,
         "feedback": feedback,
     }
     return result, 1
